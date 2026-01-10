@@ -13,7 +13,7 @@
   <script type="module">
     // ⚠️ REPLACE THESE WITH YOUR SUPABASE CREDENTIALS
     const SUPABASE_URL = 'https://feohwmdogtwwseyaohdo.supabase.co';
-    const SUPABASE_KEY = 'sb_publishable_jlcqCVhEyIQNKgIBqox1_Q_1g5A6o8W';
+    const SUPABASE_KEY = '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';
     
     // Initialize Supabase
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -99,7 +99,7 @@
       }
     }
 
-    // Generate conversation using Claude API
+    // Generate conversation using backend API
     async function generateConversation() {
       if (!state.topic.trim()) {
         alert('Please enter a topic');
@@ -134,62 +134,28 @@ Important:
 
 Generate the new conversation now:`;
 
-       async function generateConversation() {
-  if (!state.topic.trim()) {
-    alert('Please enter a topic');
-    return;
-  }
+        // Call our backend API instead of Claude directly
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ prompt }),
+        });
 
-  if (state.conversations.length === 0) {
-    alert('Please add some sample conversations first');
-    return;
-  }
+        const data = await response.json();
 
-  setState({ loading: true, generatedConvo: '' });
-
-  try {
-    const samples = state.conversations
-      .sort(() => Math.random() - 0.5)
-      .slice(0, Math.min(3, state.conversations.length))
-      .map(c => c.content)
-      .join('\n\n---\n\n');
-
-    const prompt = `You are a conversation generator. Based on the style and format of these sample buyer-seller conversations, generate a NEW and UNIQUE conversation about: "${state.topic}"
-
-Sample conversations for reference:
-${samples}
-
-Important:
-- Create a completely new conversation, don't copy the samples
-- Follow the same format and style as the samples
-- Make it realistic and natural
-- Focus on the topic: ${state.topic}
-- Include realistic buyer-seller dialogue
-
-Generate the new conversation now:`;
-
-    // Call our backend API instead of Claude directly
-    const response = await fetch('/api/generate', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ prompt }),
-    });
-
-    const data = await response.json();
-
-    if (data.text) {
-      setState({ generatedConvo: data.text, loading: false });
-    } else {
-      throw new Error(data.error || 'No response from API');
+        if (data.text) {
+          setState({ generatedConvo: data.text, loading: false });
+        } else {
+          throw new Error(data.error || 'No response from API');
+        }
+      } catch (error) {
+        console.error('Generation error:', error);
+        alert('Failed to generate conversation: ' + error.message);
+        setState({ loading: false });
+      }
     }
-  } catch (error) {
-    console.error('Generation error:', error);
-    alert('Failed to generate conversation: ' + error.message);
-    setState({ loading: false });
-  }
-}
 
     // Export data
     function exportData() {
