@@ -1,0 +1,10 @@
+{
+  "type": "module",
+  "name": "conversation-generator",
+  "version": "1.0.0",
+  "description": "Public conversation generator with AI",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'No build needed'"
+  }
+}
