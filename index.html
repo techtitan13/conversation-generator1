@@ -134,31 +134,62 @@ Important:
 
 Generate the new conversation now:`;
 
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
-            max_tokens: 1000,
-            messages: [{ role: 'user', content: prompt }],
-          }),
-        });
+       async function generateConversation() {
+  if (!state.topic.trim()) {
+    alert('Please enter a topic');
+    return;
+  }
 
-        const data = await response.json();
+  if (state.conversations.length === 0) {
+    alert('Please add some sample conversations first');
+    return;
+  }
 
-        if (data.content && data.content[0]) {
-          setState({ generatedConvo: data.content[0].text, loading: false });
-        } else {
-          throw new Error('No response from API');
-        }
-      } catch (error) {
-        console.error('Generation error:', error);
-        alert('Failed to generate conversation. Please try again.');
-        setState({ loading: false });
-      }
+  setState({ loading: true, generatedConvo: '' });
+
+  try {
+    const samples = state.conversations
+      .sort(() => Math.random() - 0.5)
+      .slice(0, Math.min(3, state.conversations.length))
+      .map(c => c.content)
+      .join('\n\n---\n\n');
+
+    const prompt = `You are a conversation generator. Based on the style and format of these sample buyer-seller conversations, generate a NEW and UNIQUE conversation about: "${state.topic}"
+
+Sample conversations for reference:
+${samples}
+
+Important:
+- Create a completely new conversation, don't copy the samples
+- Follow the same format and style as the samples
+- Make it realistic and natural
+- Focus on the topic: ${state.topic}
+- Include realistic buyer-seller dialogue
+
+Generate the new conversation now:`;
+
+    // Call our backend API instead of Claude directly
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ prompt }),
+    });
+
+    const data = await response.json();
+
+    if (data.text) {
+      setState({ generatedConvo: data.text, loading: false });
+    } else {
+      throw new Error(data.error || 'No response from API');
     }
+  } catch (error) {
+    console.error('Generation error:', error);
+    alert('Failed to generate conversation: ' + error.message);
+    setState({ loading: false });
+  }
+}
 
     // Export data
     function exportData() {
