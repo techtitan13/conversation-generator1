@@ -24,11 +24,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // Using Mistral-7B-Instruct - Free and good quality
-    const HF_MODEL = "mistralai/Mistral-7B-Instruct-v0.2";
-    
+    // Using the new HuggingFace Inference API endpoint
     const response = await fetch(
-      `https://api-inference.huggingface.co/models/${HF_MODEL}`,
+      'https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2',
       {
         method: 'POST',
         headers: {
@@ -38,10 +36,13 @@ export default async function handler(req, res) {
         body: JSON.stringify({
           inputs: prompt,
           parameters: {
-            max_new_tokens: 1000,
+            max_new_tokens: 800,
             temperature: 0.7,
-            top_p: 0.95,
-            return_full_text: false
+            top_p: 0.9,
+            do_sample: true
+          },
+          options: {
+            wait_for_model: true
           }
         })
       }
@@ -52,10 +53,10 @@ export default async function handler(req, res) {
     if (!response.ok) {
       console.error('HuggingFace API error:', data);
       
-      // Model might be loading - this is common with HF free tier
+      // Model might be loading
       if (data.error && data.error.includes('loading')) {
         return res.status(503).json({ 
-          error: 'AI model is waking up... Please wait 20 seconds and try again.',
+          error: 'AI model is starting up... Please wait 20-30 seconds and try again.',
           isLoading: true
         });
       }
@@ -66,10 +67,13 @@ export default async function handler(req, res) {
     }
 
     // HuggingFace returns an array with generated text
-    if (data && data[0] && data[0].generated_text) {
+    if (Array.isArray(data) && data[0] && data[0].generated_text) {
       return res.status(200).json({ text: data[0].generated_text });
+    } else if (typeof data === 'string') {
+      return res.status(200).json({ text: data });
     } else {
-      throw new Error('No response from API');
+      console.error('Unexpected response format:', data);
+      throw new Error('Unexpected response format from API');
     }
   } catch (error) {
     console.error('Generation error:', error);
