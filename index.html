@@ -216,47 +216,61 @@ Generate the new conversation now:`;
               ${state.activeTab === 'generate' ? `
                 <div class="p-6">
                   <div class="mb-6">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                      Enter Topic for New Conversation
+                    <label class="block text-base font-semibold text-gray-800 mb-3">
+                      📝 Enter Your Topic or Requirements
                     </label>
-                    <input
-                      type="text"
+                    <p class="text-sm text-gray-600 mb-3">
+                      Describe what kind of conversation you want to generate. Be specific for better results!
+                    </p>
+                    <textarea
                       id="topicInput"
-                      value="${state.topic}"
-                      placeholder="e.g., iPhone 15 Pro Max, MacBook Air M2, etc."
-                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+                      placeholder="Example: A conversation about selling a used iPhone 15 Pro Max 256GB in excellent condition with original box and accessories. The buyer is asking about battery health and any scratches..."
+                      rows="6"
+                      class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y text-gray-800"
+                    >${state.topic}</textarea>
+                    <p class="text-xs text-gray-500 mt-2">
+                      💡 Tip: The more detailed your topic, the better the generated conversation will be!
+                    </p>
                   </div>
 
                   <button
                     onclick="window.generateConvo()"
                     ${state.loading || state.conversations.length === 0 ? 'disabled' : ''}
-                    class="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                    class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-lg font-semibold text-lg hover:from-blue-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transition-all duration-200"
                   >
-                    ${state.loading ? '⏳ Generating...' : '✨ Generate Unique Conversation'}
+                    ${state.loading ? '⏳ Generating Amazing Conversation...' : '✨ Generate Unique Conversation'}
                   </button>
 
                   ${state.conversations.length === 0 ? `
-                    <p class="mt-4 text-sm text-orange-600 bg-orange-50 p-3 rounded-lg">
-                      ⚠️ Add some sample conversations first to enable generation
-                    </p>
+                    <div class="mt-4 p-4 bg-orange-50 border-l-4 border-orange-500 rounded-lg">
+                      <div class="flex items-start">
+                        <span class="text-2xl mr-3">⚠️</span>
+                        <div>
+                          <p class="font-semibold text-orange-800">No Sample Conversations Yet</p>
+                          <p class="text-sm text-orange-700 mt-1">
+                            Add some sample conversations in the "Manage Conversations" tab first to enable AI generation.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   ` : ''}
 
                   ${state.generatedConvo ? `
-                    <div class="mt-6">
-                      <div class="flex justify-between items-center mb-2">
-                        <h3 class="text-lg font-semibold text-gray-800">
+                    <div class="mt-6 bg-gradient-to-br from-green-50 to-blue-50 rounded-lg p-6 border-2 border-green-200">
+                      <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                          <span class="text-2xl">✅</span>
                           Generated Conversation
                         </h3>
                         <button
-                          onclick="navigator.clipboard.writeText(\`${state.generatedConvo.replace(/`/g, '\\`')}\`); alert('Copied!')"
-                          class="text-sm text-blue-600 hover:text-blue-700"
+                          onclick="navigator.clipboard.writeText(\`${state.generatedConvo.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`); alert('✅ Copied to clipboard!')"
+                          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
                         >
                           📋 Copy
                         </button>
                       </div>
-                      <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 whitespace-pre-wrap max-h-96 overflow-y-auto">
-                        ${state.generatedConvo}
+                      <div class="bg-white p-5 rounded-lg border border-gray-200 whitespace-pre-wrap max-h-[500px] overflow-y-auto text-gray-800 leading-relaxed shadow-inner">
+${state.generatedConvo}
                       </div>
                     </div>
                   ` : ''}
@@ -267,14 +281,14 @@ Generate the new conversation now:`;
               ${state.activeTab === 'manage' ? `
                 <div class="p-6">
                   <div class="mb-6">
-                    <div class="flex justify-between items-center mb-2">
-                      <label class="block text-sm font-medium text-gray-700">
-                        Add New Conversation
+                    <div class="flex justify-between items-center mb-3">
+                      <label class="block text-base font-semibold text-gray-800">
+                        ➕ Add New Conversation to Community Database
                       </label>
                       ${state.conversations.length > 0 ? `
                         <button
                           onclick="window.exportData()"
-                          class="text-sm text-blue-600 hover:text-blue-700"
+                          class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
                         >
                           📥 Export All
                         </button>
@@ -282,47 +296,55 @@ Generate the new conversation now:`;
                     </div>
                     <textarea
                       id="newConvoInput"
-                      placeholder="Paste a conversation here and share it with the community..."
-                      rows="6"
-                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Paste a conversation here and share it with the community...
+
+Example format:
+Buyer: Hi, is the iPhone still available?
+Seller: Yes! It's in excellent condition with 95% battery health.
+Buyer: Can you send more photos?
+..."
+                      rows="8"
+                      class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-y"
                     >${state.newConvo}</textarea>
                     <button
                       onclick="window.addConvo()"
-                      class="mt-2 bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700"
+                      class="mt-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-green-700 hover:to-emerald-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
                     >
-                      ➕ Add Conversation
+                      ➕ Add to Community Database
                     </button>
                   </div>
 
                   <div>
-                    <h3 class="text-lg font-semibold text-gray-800 mb-3">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                      <span class="text-2xl">💬</span>
                       Community Conversations (${state.totalConversations})
                     </h3>
                     
                     ${state.conversations.length === 0 ? `
-                      <div class="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-                        <p class="text-gray-600">No conversations yet</p>
-                        <p class="text-sm text-gray-500 mt-1">
-                          Be the first to contribute!
+                      <div class="text-center py-16 bg-gradient-to-br from-gray-50 to-blue-50 rounded-lg border-2 border-dashed border-gray-300">
+                        <div class="text-6xl mb-4">📭</div>
+                        <p class="text-xl font-semibold text-gray-700">No conversations yet</p>
+                        <p class="text-gray-600 mt-2">
+                          Be the first to contribute to our community database!
                         </p>
                       </div>
                     ` : `
-                      <div class="space-y-3 max-h-96 overflow-y-auto">
+                      <div class="space-y-4 max-h-[600px] overflow-y-auto">
                         ${state.conversations.map(convo => `
-                          <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 hover:border-gray-300">
-                            <div class="flex justify-between items-start mb-2">
-                              <span class="text-xs text-gray-500">
-                                Added: ${new Date(convo.added_at).toLocaleString()}
+                          <div class="bg-gradient-to-br from-white to-gray-50 p-5 rounded-lg border-2 border-gray-200 hover:border-blue-300 hover:shadow-lg transition-all">
+                            <div class="flex justify-between items-start mb-3">
+                              <span class="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                                📅 ${new Date(convo.added_at).toLocaleString()}
                               </span>
                               <button
                                 onclick="window.deleteConvo(${convo.id})"
-                                class="text-red-600 hover:text-red-700 text-sm"
+                                class="text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded-lg font-medium transition-all"
                               >
                                 🗑️ Delete
                               </button>
                             </div>
-                            <div class="text-sm text-gray-700 whitespace-pre-wrap line-clamp-3">
-                              ${convo.content}
+                            <div class="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed line-clamp-4">
+${convo.content}
                             </div>
                           </div>
                         `).join('')}
@@ -334,19 +356,35 @@ Generate the new conversation now:`;
             </div>
 
             <!-- Instructions -->
-            <div class="bg-white rounded-lg shadow-lg p-6">
-              <h3 class="text-lg font-semibold text-gray-800 mb-3">
-                📖 How to Use
+            <div class="bg-gradient-to-br from-white to-blue-50 rounded-lg shadow-lg p-6 border-2 border-blue-100">
+              <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <span class="text-2xl">📖</span>
+                How to Use This Tool
               </h3>
-              <ol class="space-y-2 text-gray-700">
-                <li><strong>1. Add Conversations:</strong> Share conversations with the community in the "Manage" tab</li>
-                <li><strong>2. Generate:</strong> Use existing conversations as templates to create new unique ones</li>
-                <li><strong>3. Everyone Benefits:</strong> All conversations are public and shared across all users!</li>
-              </ol>
+              <div class="space-y-3 text-gray-700">
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">1.</span>
+                  <div>
+                    <strong>Add Sample Conversations:</strong> Go to "Manage Conversations" tab and paste real conversations to build the community database
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">2.</span>
+                  <div>
+                    <strong>Describe Your Needs:</strong> In the "Generate" tab, write a detailed description of what kind of conversation you want
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">3.</span>
+                  <div>
+                    <strong>Generate & Use:</strong> Click generate and get a unique conversation based on the patterns from the community database
+                  </div>
+                </div>
+              </div>
               
-              <div class="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                <p class="text-sm text-gray-700">
-                  <strong>💡 This is a public, community-powered tool!</strong> All conversations you add will be visible to everyone using this app. Think of it as a shared knowledge base.
+              <div class="mt-5 p-4 bg-blue-100 rounded-lg border-2 border-blue-300">
+                <p class="text-sm text-gray-800">
+                  <strong>💡 Community-Powered Tool:</strong> All conversations you add are shared with everyone. This creates a collaborative knowledge base where the AI learns from real conversation patterns!
                 </p>
               </div>
             </div>
