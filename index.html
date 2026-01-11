@@ -229,7 +229,7 @@
         return;
       }
 
-      setState({ importing: true });
+      setState({ importing: true, importProgress: { current: 0, total: 0 } });
 
       try {
         // Fetch from your GitHub repo
@@ -244,7 +244,6 @@
         // Support different JSON formats
         let conversations = [];
         if (Array.isArray(data)) {
-          // Format: [{"conversation": "..."}, ...] or [{"content": "..."}, ...]
           conversations = data.map(item => {
             if (item.conversation) {
               return { content: item.conversation };
@@ -254,7 +253,6 @@
             return null;
           }).filter(item => item !== null && item.content && item.content.trim().length > 0);
         } else if (data.conversations && Array.isArray(data.conversations)) {
-          // Format: {"conversations": [{"conversation": "..."}, ...]}
           conversations = data.conversations.map(item => {
             if (item.conversation) {
               return { content: item.conversation };
@@ -264,7 +262,6 @@
             return null;
           }).filter(item => item !== null && item.content && item.content.trim().length > 0);
         } else if (typeof data === 'object' && !Array.isArray(data)) {
-          // Format: {"conv1": "text", "conv2": "text", ...}
           conversations = Object.values(data).map(content => ({ content }));
         } else {
           throw new Error('Unsupported JSON format');
@@ -274,17 +271,35 @@
           throw new Error('No conversations found in the file');
         }
 
-        alert(`Found ${conversations.length} conversations. Starting import...`);
+        // Check which conversations already exist
+        console.log('Checking for existing conversations...');
+        const { data: existingConvos } = await supabase
+          .from('conversations')
+          .select('content');
+        
+        const existingContents = new Set(existingConvos?.map(c => c.content.trim()) || []);
+        const newConversations = conversations.filter(c => !existingContents.has(c.content.trim()));
+        
+        if (newConversations.length === 0) {
+          alert('✅ All conversations already exist in the database!');
+          setState({ importing: false, importProgress: { current: 0, total: 0 } });
+          return;
+        }
 
-        setState({ importProgress: { current: 0, total: conversations.length } });
+        alert(`Found ${conversations.length} total conversations.\n${existingConvos?.length || 0} already in database.\n${newConversations.length} new conversations to import.\n\nStarting import...`);
 
-        // Import in batches with delay to avoid rate limits
-        const batchSize = 50; // Reduced from 100 to be safer
+        setState({ importProgress: { current: 0, total: newConversations.length } });
+
+        // Import in very small batches with longer delays
+        const batchSize = 20; // Smaller batches
         let imported = 0;
         let failed = 0;
+        const failedItems = [];
         
-        for (let i = 0; i < conversations.length; i += batchSize) {
-          const batch = conversations.slice(i, i + batchSize);
+        for (let i = 0; i < newConversations.length; i += batchSize) {
+          const batch = newConversations.slice(i, i + batchSize);
+          
+          console.log(`Attempting batch ${Math.floor(i/batchSize) + 1}: items ${i} to ${i + batch.length}`);
           
           try {
             const { data, error } = await supabase
@@ -295,47 +310,73 @@
             if (error) {
               console.error('Batch error:', error);
               // Try one by one if batch fails
-              for (const conv of batch) {
+              for (let j = 0; j < batch.length; j++) {
+                const conv = batch[j];
                 try {
-                  await supabase.from('conversations').insert([conv]);
-                  imported++;
+                  const { error: singleError } = await supabase
+                    .from('conversations')
+                    .insert([conv]);
+                  
+                  if (singleError) {
+                    console.error(`Failed item ${i + j}:`, singleError);
+                    failed++;
+                    failedItems.push({ index: i + j, error: singleError.message });
+                  } else {
+                    imported++;
+                  }
+                  
+                  // Small delay between individual inserts
+                  await new Promise(resolve => setTimeout(resolve, 50));
                 } catch (singleError) {
-                  console.error('Single insert failed:', singleError);
+                  console.error(`Exception on item ${i + j}:`, singleError);
                   failed++;
+                  failedItems.push({ index: i + j, error: singleError.message });
                 }
               }
             } else {
               imported += data.length;
+              console.log(`✓ Batch successful: ${data.length} items`);
             }
           } catch (batchError) {
-            console.error('Batch failed:', batchError);
+            console.error('Batch exception:', batchError);
             // Try one by one as fallback
-            for (const conv of batch) {
+            for (let j = 0; j < batch.length; j++) {
+              const conv = batch[j];
               try {
                 await supabase.from('conversations').insert([conv]);
                 imported++;
-              } catch (singleError) {
+              } catch (e) {
                 failed++;
+                failedItems.push({ index: i + j, error: e.message });
               }
+              await new Promise(resolve => setTimeout(resolve, 50));
             }
           }
           
-          setState({ importProgress: { current: imported + failed, total: conversations.length } });
-          console.log(`Progress: ${imported + failed} / ${conversations.length} (${imported} successful, ${failed} failed)`);
+          setState({ importProgress: { current: imported + failed, total: newConversations.length } });
+          console.log(`Progress: ${imported + failed} / ${newConversations.length} (${imported} successful, ${failed} failed)`);
           
-          // Add delay between batches to avoid rate limits (100ms)
-          if (i + batchSize < conversations.length) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+          // Longer delay between batches to avoid rate limits (500ms)
+          if (i + batchSize < newConversations.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
           }
         }
 
-        alert(`✅ Import complete!\n✓ Successfully imported: ${imported}\n✗ Failed: ${failed}`);
+        let resultMessage = `✅ Import complete!\n✓ Successfully imported: ${imported}\n✗ Failed: ${failed}`;
+        
+        if (failedItems.length > 0 && failedItems.length < 20) {
+          resultMessage += '\n\nFailed items:\n' + failedItems.map(f => `Item ${f.index}: ${f.error}`).join('\n');
+        }
+        
+        console.log('Failed items:', failedItems);
+        alert(resultMessage);
+        
         setState({ importing: false, importProgress: { current: 0, total: 0 } });
         await loadConversations();
       } catch (error) {
         console.error('Import error:', error);
-        alert('Import failed: ' + error.message + '\n\nMake sure /data/conversations.json exists and is valid JSON.');
-        setState({ importing: false });
+        alert('Import failed: ' + error.message + '\n\nCheck console (F12) for details.');
+        setState({ importing: false, importProgress: { current: 0, total: 0 } });
       }
     }
 
