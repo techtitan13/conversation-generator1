@@ -34,7 +34,8 @@
       adminPassword: '',
       showBulkImport: false,
       bulkImportData: '',
-      importing: false
+      importing: false,
+      importProgress: { current: 0, total: 0 }
     };
 
     function setState(updates) {
@@ -275,8 +276,10 @@
 
         alert(`Found ${conversations.length} conversations. Starting import...`);
 
-        // Import in batches of 100
-        const batchSize = 100;
+        setState({ importProgress: { current: 0, total: conversations.length } });
+
+        // Import in batches with delay to avoid rate limits
+        const batchSize = 50; // Reduced from 100 to be safer
         let imported = 0;
         let failed = 0;
         
@@ -284,26 +287,50 @@
           const batch = conversations.slice(i, i + batchSize);
           
           try {
-            const { error } = await supabase
+            const { data, error } = await supabase
               .from('conversations')
-              .insert(batch);
+              .insert(batch)
+              .select();
 
             if (error) {
               console.error('Batch error:', error);
-              failed += batch.length;
+              // Try one by one if batch fails
+              for (const conv of batch) {
+                try {
+                  await supabase.from('conversations').insert([conv]);
+                  imported++;
+                } catch (singleError) {
+                  console.error('Single insert failed:', singleError);
+                  failed++;
+                }
+              }
             } else {
-              imported += batch.length;
+              imported += data.length;
             }
           } catch (batchError) {
             console.error('Batch failed:', batchError);
-            failed += batch.length;
+            // Try one by one as fallback
+            for (const conv of batch) {
+              try {
+                await supabase.from('conversations').insert([conv]);
+                imported++;
+              } catch (singleError) {
+                failed++;
+              }
+            }
           }
           
-          console.log(`Progress: ${imported + failed} / ${conversations.length}`);
+          setState({ importProgress: { current: imported + failed, total: conversations.length } });
+          console.log(`Progress: ${imported + failed} / ${conversations.length} (${imported} successful, ${failed} failed)`);
+          
+          // Add delay between batches to avoid rate limits (100ms)
+          if (i + batchSize < conversations.length) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
         }
 
         alert(`✅ Import complete!\n✓ Successfully imported: ${imported}\n✗ Failed: ${failed}`);
-        setState({ importing: false });
+        setState({ importing: false, importProgress: { current: 0, total: 0 } });
         await loadConversations();
       } catch (error) {
         console.error('Import error:', error);
@@ -759,7 +786,7 @@ ${state.generatedConvo}
                           ${state.importing ? 'disabled' : ''}
                           class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all disabled:bg-gray-400"
                         >
-                          ${state.importing ? '⏳ Importing...' : '📂 Import from File'}
+                          ${state.importing ? `⏳ Importing... (${state.importProgress.current}/${state.importProgress.total})` : '📂 Import from File'}
                         </button>
                         <button
                           onclick="window.toggleBulkImport()"
