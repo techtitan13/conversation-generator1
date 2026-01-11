@@ -15,9 +15,6 @@
     const SUPABASE_URL = 'https://feohwmdogtwwseyaohdo.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_jlcqCVhEyIQNKgIBqox1_Q_1g5A6o8W';
     
-    // ⚠️ SET YOUR ADMIN PASSWORD HERE (change this!)
-    const ADMIN_PASSWORD = 'admin123';
-    
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     let state = {
@@ -71,31 +68,52 @@
       }
     }
 
-    // Admin login
+    // Admin login - now secure via API
     async function adminLogin() {
-      if (state.adminPassword === ADMIN_PASSWORD) {
-        // Generate session token
-        const token = 'admin_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
-        
-        try {
-          const { error } = await supabase
+      if (!state.adminPassword.trim()) {
+        alert('Please enter password');
+        return;
+      }
+
+      try {
+        // Call secure backend API
+        const response = await fetch('/api/admin-auth', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ password: state.adminPassword }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          // Store admin session
+          const sessionData = {
+            token: data.token,
+            timestamp: Date.now(),
+            expires: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days
+          };
+          
+          localStorage.setItem('adminSession', JSON.stringify(sessionData));
+          
+          // Also store in Supabase for cross-device support (optional)
+          await supabase
             .from('admin_sessions')
             .insert([{ 
-              session_token: token,
-              expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+              session_token: data.token,
+              expires_at: new Date(sessionData.expires).toISOString()
             }]);
 
-          if (error) throw error;
-
-          localStorage.setItem('adminToken', token);
           setState({ isAdmin: true, showAdminLogin: false, adminPassword: '' });
           alert('✅ Logged in as Admin!');
-        } catch (error) {
-          console.error('Login error:', error);
-          alert('Login failed. Please try again.');
+        } else {
+          alert('❌ ' + (data.error || 'Invalid password'));
+          setState({ adminPassword: '' });
         }
-      } else {
-        alert('❌ Incorrect password!');
+      } catch (error) {
+        console.error('Login error:', error);
+        alert('Login failed: ' + error.message);
         setState({ adminPassword: '' });
       }
     }
