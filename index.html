@@ -31,7 +31,10 @@
       totalConversations: 0,
       isAdmin: false,
       showAdminLogin: false,
-      adminPassword: ''
+      adminPassword: '',
+      showBulkImport: false,
+      bulkImportData: '',
+      importing: false
     };
 
     function setState(updates) {
@@ -121,6 +124,164 @@
         console.error('Error loading:', error);
         alert('Error loading conversations: ' + error.message);
         setState({ isInitialized: true });
+      }
+    }
+
+    // Import from GitHub JSON file
+    async function importFromGitHub() {
+      if (!confirm('Import conversations from /data/conversations.json? This will add all conversations from the file.')) {
+        return;
+      }
+
+      setState({ importing: true });
+
+      try {
+        // Fetch from your GitHub repo
+        const response = await fetch('/data/conversations.json');
+        
+        if (!response.ok) {
+          throw new Error('Failed to load conversations.json file');
+        }
+
+        const data = await response.json();
+        
+        // Support different JSON formats
+        let conversations = [];
+        if (Array.isArray(data)) {
+          // Format: [{"conversation": "..."}, ...] or [{"content": "..."}, ...]
+          conversations = data.map(item => {
+            if (item.conversation) {
+              return { content: item.conversation };
+            } else if (item.content) {
+              return { content: item.content };
+            }
+            return null;
+          }).filter(item => item !== null && item.content && item.content.trim().length > 0);
+        } else if (data.conversations && Array.isArray(data.conversations)) {
+          // Format: {"conversations": [{"conversation": "..."}, ...]}
+          conversations = data.conversations.map(item => {
+            if (item.conversation) {
+              return { content: item.conversation };
+            } else if (item.content) {
+              return { content: item.content };
+            }
+            return null;
+          }).filter(item => item !== null && item.content && item.content.trim().length > 0);
+        } else if (typeof data === 'object' && !Array.isArray(data)) {
+          // Format: {"conv1": "text", "conv2": "text", ...}
+          conversations = Object.values(data).map(content => ({ content }));
+        } else {
+          throw new Error('Unsupported JSON format');
+        }
+
+        if (conversations.length === 0) {
+          throw new Error('No conversations found in the file');
+        }
+
+        alert(`Found ${conversations.length} conversations. Starting import...`);
+
+        // Import in batches of 100
+        const batchSize = 100;
+        let imported = 0;
+        let failed = 0;
+        
+        for (let i = 0; i < conversations.length; i += batchSize) {
+          const batch = conversations.slice(i, i + batchSize);
+          
+          try {
+            const { error } = await supabase
+              .from('conversations')
+              .insert(batch);
+
+            if (error) {
+              console.error('Batch error:', error);
+              failed += batch.length;
+            } else {
+              imported += batch.length;
+            }
+          } catch (batchError) {
+            console.error('Batch failed:', batchError);
+            failed += batch.length;
+          }
+          
+          console.log(`Progress: ${imported + failed} / ${conversations.length}`);
+        }
+
+        alert(`✅ Import complete!\n✓ Successfully imported: ${imported}\n✗ Failed: ${failed}`);
+        setState({ importing: false });
+        await loadConversations();
+      } catch (error) {
+        console.error('Import error:', error);
+        alert('Import failed: ' + error.message + '\n\nMake sure /data/conversations.json exists and is valid JSON.');
+        setState({ importing: false });
+      }
+    }
+
+    // Bulk import conversations
+    async function bulkImportConversations() {
+      if (!state.bulkImportData.trim()) {
+        alert('Please paste your conversation data');
+        return;
+      }
+
+      setState({ importing: true });
+
+      try {
+        // Try to parse as JSON first
+        let conversations = [];
+        
+        try {
+          const parsed = JSON.parse(state.bulkImportData);
+          if (parsed.conversations && Array.isArray(parsed.conversations)) {
+            conversations = parsed.conversations;
+          } else if (Array.isArray(parsed)) {
+            conversations = parsed;
+          } else {
+            throw new Error('Invalid format');
+          }
+        } catch (e) {
+          // If JSON parse fails, try line-by-line format
+          const lines = state.bulkImportData.split('\n---CONVERSATION---\n');
+          conversations = lines
+            .map(line => line.trim())
+            .filter(line => line.length > 10)
+            .map(content => ({ content }));
+        }
+
+        if (conversations.length === 0) {
+          throw new Error('No valid conversations found');
+        }
+
+        // Confirm before importing
+        if (!confirm(`Import ${conversations.length} conversations? This may take a minute.`)) {
+          setState({ importing: false });
+          return;
+        }
+
+        // Import in batches of 100 to avoid timeout
+        const batchSize = 100;
+        let imported = 0;
+        
+        for (let i = 0; i < conversations.length; i += batchSize) {
+          const batch = conversations.slice(i, i + batchSize);
+          
+          const { error } = await supabase
+            .from('conversations')
+            .insert(batch);
+
+          if (error) throw error;
+          
+          imported += batch.length;
+          console.log(`Imported ${imported} of ${conversations.length} conversations`);
+        }
+
+        alert(`✅ Successfully imported ${conversations.length} conversations!`);
+        setState({ bulkImportData: '', showBulkImport: false, importing: false });
+        await loadConversations();
+      } catch (error) {
+        console.error('Import error:', error);
+        alert('Import failed: ' + error.message);
+        setState({ importing: false });
       }
     }
 
@@ -475,18 +636,74 @@ ${state.generatedConvo}
                       <label class="block text-base font-semibold text-gray-800">
                         ➕ Add New Conversation to Database
                       </label>
-                      ${state.conversations.length > 0 ? `
+                      <div class="flex gap-2">
+                        ${state.conversations.length > 0 ? `
+                          <button
+                            onclick="window.exportData()"
+                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                          >
+                            📥 Export All (${state.conversations.length})
+                          </button>
+                        ` : ''}
                         <button
-                          onclick="window.exportData()"
-                          class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                          onclick="window.importFromGitHub()"
+                          ${state.importing ? 'disabled' : ''}
+                          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all disabled:bg-gray-400"
                         >
-                          📥 Export All (${state.conversations.length})
+                          ${state.importing ? '⏳ Importing...' : '📂 Import from File'}
                         </button>
-                      ` : ''}
+                        <button
+                          onclick="window.toggleBulkImport()"
+                          class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                        >
+                          📦 Manual Import
+                        </button>
+                      </div>
                     </div>
                     <p class="text-sm text-gray-600 mb-3">
                       ${state.isAdmin ? '👑 <strong>Admin:</strong> You can add and delete conversations.' : '👤 <strong>Visitor:</strong> You can add conversations. Only admins can delete.'}
                     </p>
+                    
+                    ${state.showBulkImport ? `
+                      <div class="mb-4 p-4 bg-purple-50 border-2 border-purple-300 rounded-lg">
+                        <div class="flex justify-between items-center mb-3">
+                          <h4 class="font-bold text-gray-800">📦 Bulk Import Conversations</h4>
+                          <button
+                            onclick="window.toggleBulkImport()"
+                            class="text-sm text-gray-600 hover:text-gray-800"
+                          >
+                            ✕ Close
+                          </button>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-3">
+                          Paste your conversations in one of these formats:
+                        </p>
+                        <div class="text-xs bg-white p-3 rounded border mb-3 font-mono">
+                          <strong>Format 1 - Line by line with separator:</strong><br/>
+                          Conversation 1 text here...<br/>
+                          ---CONVERSATION---<br/>
+                          Conversation 2 text here...<br/>
+                          ---CONVERSATION---<br/>
+                          Conversation 3 text here...<br/><br/>
+                          <strong>Format 2 - JSON:</strong><br/>
+                          [{"content": "Conv 1"}, {"content": "Conv 2"}]
+                        </div>
+                        <textarea
+                          id="bulkImportInput"
+                          placeholder="Paste all your conversations here..."
+                          rows="10"
+                          class="w-full px-4 py-3 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y font-mono text-xs"
+                        >${state.bulkImportData}</textarea>
+                        <button
+                          onclick="window.bulkImport()"
+                          ${state.importing ? 'disabled' : ''}
+                          class="mt-3 w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                        >
+                          ${state.importing ? '⏳ Importing...' : '📦 Import All Conversations'}
+                        </button>
+                      </div>
+                    ` : ''}
+                    
                     <textarea
                       id="newConvoInput"
                       placeholder="Paste a conversation here...
@@ -605,6 +822,13 @@ ${convo.content}
         });
       }
 
+      const bulkImportInput = document.getElementById('bulkImportInput');
+      if (bulkImportInput) {
+        bulkImportInput.addEventListener('input', (e) => {
+          state.bulkImportData = e.target.value;
+        });
+      }
+
       const adminPasswordInput = document.getElementById('adminPasswordInput');
       if (adminPasswordInput) {
         adminPasswordInput.addEventListener('input', (e) => {
@@ -627,6 +851,9 @@ ${convo.content}
     window.adminLogin = adminLogin;
     window.adminLogout = adminLogout;
     window.toggleAdminLogin = () => setState({ showAdminLogin: !state.showAdminLogin, adminPassword: '' });
+    window.toggleBulkImport = () => setState({ showBulkImport: !state.showBulkImport, bulkImportData: '' });
+    window.bulkImport = bulkImportConversations;
+    window.importFromGitHub = importFromGitHub;
 
     // Initialize
     async function init() {
