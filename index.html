@@ -11,14 +11,15 @@
   <div id="root"></div>
 
   <script type="module">
-    // ⚠️ REPLACE THESE WITH YOUR SUPABASE CREDENTIALS
+    // ⚠️ REPLACE THESE WITH YOUR CREDENTIALS
     const SUPABASE_URL = 'https://feohwmdogtwwseyaohdo.supabase.co';
     const SUPABASE_KEY = 'sb_publishable_jlcqCVhEyIQNKgIBqox1_Q_1g5A6o8W';
     
-    // Initialize Supabase
+    // ⚠️ SET YOUR ADMIN PASSWORD HERE (change this!)
+    const ADMIN_PASSWORD = 'admin123';
+    
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-    // Simple React-like framework
     let state = {
       conversations: [],
       newConvo: '',
@@ -27,7 +28,10 @@
       loading: false,
       activeTab: 'generate',
       isInitialized: false,
-      totalConversations: 0
+      totalConversations: 0,
+      isAdmin: false,
+      showAdminLogin: false,
+      adminPassword: ''
     };
 
     function setState(updates) {
@@ -35,7 +39,70 @@
       render();
     }
 
-    // Load conversations from Supabase
+    // Check if user is admin on load
+    async function checkAdminStatus() {
+      const token = localStorage.getItem('adminToken');
+      if (!token) {
+        setState({ isAdmin: false });
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('admin_sessions')
+          .select('*')
+          .eq('session_token', token)
+          .gt('expires_at', new Date().toISOString())
+          .single();
+
+        if (error || !data) {
+          localStorage.removeItem('adminToken');
+          setState({ isAdmin: false });
+        } else {
+          setState({ isAdmin: true });
+        }
+      } catch (error) {
+        localStorage.removeItem('adminToken');
+        setState({ isAdmin: false });
+      }
+    }
+
+    // Admin login
+    async function adminLogin() {
+      if (state.adminPassword === ADMIN_PASSWORD) {
+        // Generate session token
+        const token = 'admin_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+        
+        try {
+          const { error } = await supabase
+            .from('admin_sessions')
+            .insert([{ 
+              session_token: token,
+              expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+            }]);
+
+          if (error) throw error;
+
+          localStorage.setItem('adminToken', token);
+          setState({ isAdmin: true, showAdminLogin: false, adminPassword: '' });
+          alert('✅ Logged in as Admin!');
+        } catch (error) {
+          console.error('Login error:', error);
+          alert('Login failed. Please try again.');
+        }
+      } else {
+        alert('❌ Incorrect password!');
+        setState({ adminPassword: '' });
+      }
+    }
+
+    // Admin logout
+    function adminLogout() {
+      localStorage.removeItem('adminToken');
+      setState({ isAdmin: false, adminPassword: '' });
+      alert('👋 Logged out successfully!');
+    }
+
     async function loadConversations() {
       try {
         const { data, error } = await supabase
@@ -57,7 +124,6 @@
       }
     }
 
-    // Add conversation
     async function addConversation() {
       if (!state.newConvo.trim()) {
         alert('Please enter a conversation');
@@ -80,9 +146,13 @@
       }
     }
 
-    // Delete conversation
     async function deleteConversation(id) {
-      if (!confirm('Delete this conversation?')) return;
+      if (!state.isAdmin) {
+        alert('❌ Only admins can delete conversations!');
+        return;
+      }
+
+      if (!confirm('Delete this conversation? This cannot be undone.')) return;
 
       try {
         const { error } = await supabase
@@ -93,13 +163,13 @@
         if (error) throw error;
 
         await loadConversations();
+        alert('✅ Conversation deleted!');
       } catch (error) {
         console.error('Error deleting:', error);
         alert('Error deleting conversation: ' + error.message);
       }
     }
 
-    // IMPROVED: Generate conversation with better pattern matching
     async function generateConversation() {
       if (!state.topic.trim()) {
         alert('Please enter a topic/description for the conversation');
@@ -114,14 +184,12 @@
       setState({ loading: true, generatedConvo: '' });
 
       try {
-        // IMPROVED: Get 5 samples instead of 3 for better pattern learning
         const samples = state.conversations
           .sort(() => Math.random() - 0.5)
           .slice(0, Math.min(5, state.conversations.length))
           .map((c, idx) => `EXAMPLE ${idx + 1}:\n${c.content}`)
           .join('\n\n═══════════════════════════════════════\n\n');
 
-        // IMPROVED: Much more detailed and strict prompt
         const prompt = `You are an expert conversation pattern replicator. Your job is to study example conversations and generate NEW conversations that EXACTLY match their style, format, and structure.
 
 TASK: Generate a conversation about the following topic/description:
@@ -164,7 +232,6 @@ OUTPUT RULES:
 
 BEGIN GENERATING NOW:`;
 
-        // Call API
         const response = await fetch('/api/generate', {
           method: 'POST',
           headers: {
@@ -176,32 +243,26 @@ BEGIN GENERATING NOW:`;
         const data = await response.json();
 
         if (data.text) {
-          // IMPROVED: Clean up and validate the response
           let cleanedText = data.text.trim();
           
-          // Remove common AI commentary/prefixes
           cleanedText = cleanedText
             .replace(/^(Here's the conversation|Here is the conversation|Here's|Here is|Generated conversation:?|Let me (create|generate)|I'll (create|generate)|Sure,? here'?s?|Okay,? here'?s?)/i, '')
-            .replace(/^[:\-\s]+/, '') // Remove leading colons, dashes, spaces
+            .replace(/^[:\-\s]+/, '')
             .trim();
           
-          // Remove markdown code blocks if present
           cleanedText = cleanedText.replace(/^```[\w]*\n?/gm, '').replace(/\n?```$/gm, '');
           
-          // Check if it follows a conversational pattern
           const hasDialogueFormat = /^(Buyer|Seller|Customer|Agent|User|Person|Client|Representative|Support|Sales|Student|Teacher|Applicant|Interviewer|Patient|Doctor|Host|Guest):/im.test(cleanedText);
           
           if (!hasDialogueFormat) {
             console.warn('Generated text might not match expected format');
-            // Try to detect if it's still a valid conversation
             const looksLikeConversation = cleanedText.includes(':') && cleanedText.split('\n').length > 3;
             
             if (!looksLikeConversation) {
-              alert('⚠️ The AI response doesn\'t look like a proper conversation. This might happen with some models. Try generating again, or consider switching to a better model (like GPT-4).');
+              alert('⚠️ The AI response doesn\'t look like a proper conversation. Try generating again.');
             }
           }
           
-          // Check minimum length (should have at least a few exchanges)
           const lineCount = cleanedText.split('\n').filter(line => line.trim().length > 0).length;
           if (lineCount < 4) {
             alert('⚠️ Generated conversation seems too short. Try again or add more detailed examples.');
@@ -218,7 +279,6 @@ BEGIN GENERATING NOW:`;
       }
     }
 
-    // Export data
     function exportData() {
       const dataStr = JSON.stringify(state.conversations, null, 2);
       const blob = new Blob([dataStr], { type: 'application/json' });
@@ -229,7 +289,6 @@ BEGIN GENERATING NOW:`;
       link.click();
     }
 
-    // Render function
     function render() {
       const root = document.getElementById('root');
       
@@ -248,18 +307,73 @@ BEGIN GENERATING NOW:`;
             
             <!-- Header -->
             <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
-              <h1 class="text-3xl font-bold text-gray-800 mb-2">
-                🌐 Public Conversation Generator
-              </h1>
-              <p class="text-gray-600">
-                AI-powered conversation generator with community database - Pattern-matching technology!
-              </p>
-              <div class="mt-4 flex gap-4 text-sm">
-                <div class="flex items-center gap-2">
-                  <span class="font-semibold text-2xl text-blue-600">${state.totalConversations}</span>
-                  <span class="text-gray-600">conversations in database</span>
+              <div class="flex justify-between items-start">
+                <div>
+                  <h1 class="text-3xl font-bold text-gray-800 mb-2">
+                    🌐 Public Conversation Generator
+                  </h1>
+                  <p class="text-gray-600">
+                    AI-powered conversation generator with community database
+                  </p>
+                  <div class="mt-4 flex gap-4 text-sm">
+                    <div class="flex items-center gap-2">
+                      <span class="font-semibold text-2xl text-blue-600">${state.totalConversations}</span>
+                      <span class="text-gray-600">conversations in database</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Admin Section -->
+                <div class="flex flex-col items-end gap-2">
+                  ${state.isAdmin ? `
+                    <div class="flex items-center gap-2 bg-green-100 px-4 py-2 rounded-lg border-2 border-green-300">
+                      <span class="text-2xl">👑</span>
+                      <span class="font-bold text-green-800">Admin Mode</span>
+                    </div>
+                    <button
+                      onclick="window.adminLogout()"
+                      class="text-sm text-red-600 hover:text-red-700 font-medium"
+                    >
+                      🚪 Logout
+                    </button>
+                  ` : `
+                    <button
+                      onclick="window.toggleAdminLogin()"
+                      class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg text-gray-700 font-medium transition-all"
+                    >
+                      🔐 Admin Login
+                    </button>
+                  `}
                 </div>
               </div>
+
+              <!-- Admin Login Modal -->
+              ${state.showAdminLogin && !state.isAdmin ? `
+                <div class="mt-4 p-4 bg-blue-50 border-2 border-blue-300 rounded-lg">
+                  <h3 class="font-bold text-gray-800 mb-3">🔐 Admin Login</h3>
+                  <div class="flex gap-2">
+                    <input
+                      type="password"
+                      id="adminPasswordInput"
+                      placeholder="Enter admin password"
+                      class="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      value="${state.adminPassword}"
+                    />
+                    <button
+                      onclick="window.adminLogin()"
+                      class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                    >
+                      Login
+                    </button>
+                    <button
+                      onclick="window.toggleAdminLogin()"
+                      class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ` : ''}
             </div>
 
             <!-- Tabs -->
@@ -371,7 +485,7 @@ ${state.generatedConvo}
                       ` : ''}
                     </div>
                     <p class="text-sm text-gray-600 mb-3">
-                      Paste real conversations here. The more examples you add, the better the AI will replicate your conversation style!
+                      ${state.isAdmin ? '👑 <strong>Admin:</strong> You can add and delete conversations.' : '👤 <strong>Visitor:</strong> You can add conversations. Only admins can delete.'}
                     </p>
                     <textarea
                       id="newConvoInput"
@@ -416,12 +530,16 @@ Seller: Sure, I'll send them right now. No scratches at all!
                               <span class="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
                                 📅 ${new Date(convo.added_at).toLocaleString()}
                               </span>
-                              <button
-                                onclick="window.deleteConvo(${convo.id})"
-                                class="text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded-lg font-medium transition-all"
-                              >
-                                🗑️ Delete
-                              </button>
+                              ${state.isAdmin ? `
+                                <button
+                                  onclick="window.deleteConvo(${convo.id})"
+                                  class="text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded-lg font-medium transition-all flex items-center gap-1"
+                                >
+                                  🗑️ Delete
+                                </button>
+                              ` : `
+                                <span class="text-xs text-gray-400 px-3 py-1">🔒 Protected</span>
+                              `}
                             </div>
                             <div class="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed line-clamp-6 font-mono">
 ${convo.content}
@@ -439,7 +557,7 @@ ${convo.content}
             <div class="bg-gradient-to-br from-white to-blue-50 rounded-lg shadow-lg p-6 border-2 border-blue-100">
               <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
                 <span class="text-2xl">📖</span>
-                How Pattern-Matching Works
+                How It Works
               </h3>
               <div class="space-y-3 text-gray-700">
                 <div class="flex items-start gap-3">
@@ -464,7 +582,7 @@ ${convo.content}
               
               <div class="mt-5 p-4 bg-blue-100 rounded-lg border-2 border-blue-300">
                 <p class="text-sm text-gray-800">
-                  <strong>🎯 Best Practices:</strong> Add conversations that all follow the same format. If your examples are inconsistent, the AI won't know which pattern to follow. More examples = better results!
+                  <strong>👤 User Roles:</strong> All visitors can add conversations to help grow the database. Only admins can delete conversations to maintain quality.
                 </p>
               </div>
             </div>
@@ -472,7 +590,7 @@ ${convo.content}
         </div>
       `;
 
-      // Attach event listeners
+      // Event listeners
       const topicInput = document.getElementById('topicInput');
       if (topicInput) {
         topicInput.addEventListener('input', (e) => {
@@ -486,6 +604,18 @@ ${convo.content}
           state.newConvo = e.target.value;
         });
       }
+
+      const adminPasswordInput = document.getElementById('adminPasswordInput');
+      if (adminPasswordInput) {
+        adminPasswordInput.addEventListener('input', (e) => {
+          state.adminPassword = e.target.value;
+        });
+        adminPasswordInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+            adminLogin();
+          }
+        });
+      }
     }
 
     // Global functions
@@ -494,9 +624,17 @@ ${convo.content}
     window.deleteConvo = deleteConversation;
     window.generateConvo = generateConversation;
     window.exportData = exportData;
+    window.adminLogin = adminLogin;
+    window.adminLogout = adminLogout;
+    window.toggleAdminLogin = () => setState({ showAdminLogin: !state.showAdminLogin, adminPassword: '' });
 
     // Initialize
-    loadConversations();
+    async function init() {
+      await checkAdminStatus();
+      await loadConversations();
+    }
+    
+    init();
   </script>
 </body>
 </html>
