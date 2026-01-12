@@ -926,6 +926,12 @@ Seller: Sure, I'll send them right now. No scratches at all!
                       Community Database (${state.totalConversations})
                     </h3>
                     
+                    ${state.totalConversations > 100 ? `
+                      <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-gray-700">
+                        ℹ️ Showing latest 100 conversations out of ${state.totalConversations} total. All conversations are used for AI generation.
+                      </div>
+                    ` : ''}
+                    
                     ${state.conversations.length === 0 ? `
                       <div class="text-center py-16 bg-gradient-to-br from-gray-50 to-blue-50 rounded-lg border-2 border-dashed border-gray-300">
                         <div class="text-6xl mb-4">📭</div>
