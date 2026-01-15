@@ -1,684 +1,684 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Conversation Generator - Public Dashboard</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conversation Generator - Public Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
-<div id="root"></div>
-
-<script type="module">
-// ⚠️ REPLACE THESE WITH YOUR CREDENTIALS
-const SUPABASE_URL = 'https://feohwmdogtwwseyaohdo.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_jlcqCVhEyIQNKgIBqox1_Q_1g5A6o8W';
-
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-
-let state = {
-conversations: [],
-newConvo: '',
-topic: '',
-generatedConvo: '',
-loading: false,
-activeTab: 'generate',
-isInitialized: false,
-totalConversations: 0,
-isAdmin: false,
-showAdminLogin: false,
-adminPassword: '',
-showBulkImport: false,
-bulkImportData: '',
-importing: false,
-importProgress: { current: 0, total: 0 },
-showGoogleDocsImport: false,
-googleDocsLinks: ''
-};
-
-function setState(updates) {
-state = { ...state, ...updates };
-render();
-}
-
-// Check if user is admin on load
-async function checkAdminStatus() {
-const token = localStorage.getItem('adminToken');
-if (!token) {
-setState({ isAdmin: false });
-return;
-}
-
-try {
-const { data, error } = await supabase
-.from('admin_sessions')
-.select('*')
-.eq('session_token', token)
-.gt('expires_at', new Date().toISOString())
-.single();
-
-if (error || !data) {
-localStorage.removeItem('adminToken');
-setState({ isAdmin: false });
-} else {
-setState({ isAdmin: true });
-}
-} catch (error) {
-localStorage.removeItem('adminToken');
-setState({ isAdmin: false });
-}
-}
-
-// Admin login - now secure via API
-async function adminLogin() {
-if (!state.adminPassword.trim()) {
-alert('Please enter password');
-return;
-}
-
-try {
-// Call secure backend API
-const response = await fetch('/api/admin-auth', {
-method: 'POST',
-headers: {
-Content-Type': 'application/json',
-},
-body: JSON.stringify({ password: state.adminPassword }),
-});
-
-const data = await response.json();
-
-if (response.ok && data.success) {
-// Store admin session
-const sessionData = {
-token: data.token,
-timestamp: Date.now(),
-expires: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days
-};
-
-localStorage.setItem('adminSession', JSON.stringify(sessionData));
-
-// Also store in Supabase for cross-device support (optional)
-await supabase
-.from('admin_sessions')
-.insert([{
-session_token: data.token,
-expires_at: new Date(sessionData.expires).toISOString()
-}]);
-
-setState({ isAdmin: true, showAdminLogin: false, adminPassword: '' });
-alert('✅ Logged in as Admin!');
-} else {
-alert('❌ ' + (data.error || 'Invalid password'));
-setState({ adminPassword: '' });
-}
-} catch (error) {
-console.error('Login error:', error);
-alert('Login failed: ' + error.message);
-setState({ adminPassword: '' });
-}
-}
-
-// Admin logout
-function adminLogout() {
-localStorage.removeItem('adminToken');
-setState({ isAdmin: false, adminPassword: '' });
-alert('👋 Logged out successfully!');
-}
-
-// Clear all conversations (Admin only)
-async function clearAllConversations() {
-if (!state.isAdmin) {
-alert('❌ Only admins can clear the database!');
-return;
-}
-
-const confirmText = prompt(
-⚠️ WARNING: This will DELETE ALL conversations from the database!\n\n' +
-This action CANNOT be undone!\n\n' +
-Type "DELETE ALL" to confirm:'
-);
-
-if (confirmText !== 'DELETE ALL') {
-alert('Cancelled. No data was deleted.');
-return;
-}
-
-try {
-// Delete all conversations
-const { error } = await supabase
-.from('conversations')
-.delete()
-.neq('id', 0); // This deletes everything
-
-if (error) throw error;
-
-alert('✅ All conversations have been deleted!');
-await loadConversations();
-} catch (error) {
-console.error('Error clearing data:', error);
-alert('Error clearing database: ' + error.message);
-}
-}
-
-// Remove duplicate conversations (Admin only)
-async function removeDuplicates() {
-if (!state.isAdmin) {
-alert('❌ Only admins can remove duplicates!');
-return;
-}
-
-if (!confirm('Remove duplicate conversations? This will keep only one copy of each unique conversation.')) {
-return;
-}
-
-try {
-// Get all conversations
-const { data: allConvos, error } = await supabase
-.from('conversations')
-.select('*')
-.order('added_at', { ascending: true });
-
-if (error) throw error;
-
-// Find duplicates
-const seen = new Map();
-const duplicateIds = [];
-
-allConvos.forEach(convo => {
-const normalizedContent = convo.content.trim();
-if (seen.has(normalizedContent)) {
-duplicateIds.push(convo.id);
-} else {
-seen.set(normalizedContent, convo.id);
-}
-});
-
-if (duplicateIds.length === 0) {
-alert('✅ No duplicates found!');
-return;
-}
-
-if (!confirm(`Found ${duplicateIds.length} duplicate conversations. Delete them?`)) {
-return;
-}
-
-// Delete duplicates in batches
-const batchSize = 100;
-for (let i = 0; i < duplicateIds.length; i += batchSize) {
-const batch = duplicateIds.slice(i, i + batchSize);
-await supabase
-.from('conversations')
-.delete()
-.in('id', batch);
-}
-
-alert(`✅ Removed ${duplicateIds.length} duplicate conversations!`);
-await loadConversations();
-} catch (error) {
-console.error('Error removing duplicates:', error);
-alert('Error removing duplicates: ' + error.message);
-}
-}
-
-async function loadConversations() {
-try {
-const { data, error } = await supabase
-.from('conversations')
-.select('*')
-.order('added_at', { ascending: false });
-
-if (error) throw error;
-
-setState({
-conversations: data || [],
-totalConversations: data?.length || 0,
-isInitialized: true
-});
-} catch (error) {
-console.error('Error loading:', error);
-alert('Error loading conversations: ' + error.message);
-setState({ isInitialized: true });
-}
-}
-
-// Import from Google Docs links
-async function importFromGoogleDocs() {
-if (!state.googleDocsLinks.trim()) {
-alert('Please paste Google Docs links');
-return;
-}
-
-// Extract links from text
-const links = state.googleDocsLinks
-.split('\n')
-.map(line => line.trim())
-.filter(line => line.includes('docs.google.com') || line.includes('drive.google.com'));
-
-if (links.length === 0) {
-alert('No valid Google Docs links found. Make sure links contain "docs.google.com"');
-return;
-}
-
-if (!confirm(`Found ${links.length} Google Docs links. Import conversations from all of them?`)) {
-return;
-}
-
-setState({ importing: true, importProgress: { current: 0, total: links.length } });
-
-const conversations = [];
-const failed = [];
-
-for (let i = 0; i < links.length; i++) {
-const link = links[i];
-
-try {
-console.log(`Processing document ${i + 1}/${links.length}: ${link}`);
-
-// Extract document ID from link
-let docId = '';
-if (link.includes('/document/d/')) {
-docId = link.split('/document/d/')[1].split('/')[0];
-} else if (link.includes('/file/d/')) {
-docId = link.split('/file/d/')[1].split('/')[0];
-} else if (link.includes('id=')) {
-docId = link.split('id=')[1].split('&')[0];
-}
-
-if (!docId) {
-console.error('Could not extract document ID from:', link);
-failed.push({ link, error: 'Invalid link format' });
-continue;
-}
-
-// Use Google Docs export as plain text
-const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
-
-const response = await fetch(exportUrl);
-
-if (!response.ok) {
-console.error('Failed to fetch document:', response.status);
-failed.push({ link, error: `HTTP ${response.status} - Document may be private` });
-continue;
-}
-
-const text = await response.text();
-
-if (!text || text.trim().length < 10) {
-failed.push({ link, error: 'Document is empty or too short' });
-continue;
-}
-
-conversations.push({ content: text.trim() });
-console.log(`✓ Successfully extracted document ${i + 1}`);
-
-} catch (error) {
-console.error(`Error processing document ${i + 1}:`, error);
-failed.push({ link, error: error.message });
-}
-
-setState({ importProgress: { current: i + 1, total: links.length } });
-
-// Small delay to avoid rate limits
-await new Promise(resolve => setTimeout(resolve, 200));
-}
-
-if (conversations.length === 0) {
-alert('❌ No conversations extracted. All documents failed.\n\nMake sure:\n1. Documents are set to "Anyone with the link can view"\n2. Links are correct Google Docs URLs');
-setState({ importing: false, importProgress: { current: 0, total: 0 } });
-return;
-}
-
-// Now import to database
-console.log(`Importing ${conversations.length} conversations to database...`);
-
-const batchSize = 20;
-let imported = 0;
-let importFailed = 0;
-
-for (let i = 0; i < conversations.length; i += batchSize) {
-const batch = conversations.slice(i, i + batchSize);
-
-try {
-const { data, error } = await supabase
-.from('conversations')
-.insert(batch)
-.select();
-
-if (error) {
-console.error('Batch import error:', error);
-importFailed += batch.length;
-} else {
-imported += data.length;
-}
-} catch (error) {
-console.error('Batch exception:', error);
-importFailed += batch.length;
-}
-
-await new Promise(resolve => setTimeout(resolve, 300));
-}
-
-let message = `✅ Import Complete!\n\n`;
-message += `📄 Documents processed: ${links.length}\n`;
-message += `✓ Successfully extracted: ${conversations.length}\n`;
-message += `✗ Failed to extract: ${failed.length}\n\n`;
-message += `💾 Database Import:\n`;
-message += `✓ Successfully imported: ${imported}\n`;
-message += `✗ Failed: ${importFailed}`;
-
-if (failed.length > 0 && failed.length < 10) {
-message += '\n\nFailed documents:\n';
-failed.forEach((f, idx) => {
-message += `${idx + 1}. ${f.error}\n`;
-});
-}
-
-alert(message);
-
-setState({
-importing: false,
-importProgress: { current: 0, total: 0 },
-showGoogleDocsImport: false,
-googleDocsLinks: ''
-});
-
-await loadConversations();
-}
-
-// Import from GitHub JSON file
-async function importFromGitHub() {
-if (!confirm('Import conversations from /data/conversations.json? This will add all conversations from the file.')) {
-return;
-}
-
-setState({ importing: true, importProgress: { current: 0, total: 0 } });
-
-try {
-// Fetch from your GitHub repo
-const response = await fetch('/data/conversations.json');
-
-if (!response.ok) {
-throw new Error('Failed to load conversations.json file');
-}
-
-const data = await response.json();
-
-// Support different JSON formats
-let conversations = [];
-if (Array.isArray(data)) {
-conversations = data.map(item => {
-if (item.conversation) {
-return { content: item.conversation };
-} else if (item.content) {
-return { content: item.content };
-}
-return null;
-}).filter(item => item !== null && item.content && item.content.trim().length > 0);
-} else if (data.conversations && Array.isArray(data.conversations)) {
-conversations = data.conversations.map(item => {
-if (item.conversation) {
-return { content: item.conversation };
-} else if (item.content) {
-return { content: item.content };
-}
-return null;
-}).filter(item => item !== null && item.content && item.content.trim().length > 0);
-} else if (typeof data === 'object' && !Array.isArray(data)) {
-conversations = Object.values(data).map(content => ({ content }));
-} else {
-throw new Error('Unsupported JSON format');
-}
-
-if (conversations.length === 0) {
-throw new Error('No conversations found in the file');
-}
-
-// Check which conversations already exist
-console.log('Checking for existing conversations...');
-const { data: existingConvos } = await supabase
-.from('conversations')
-.select('content');
-
-const existingContents = new Set(existingConvos?.map(c => c.content.trim()) || []);
-const newConversations = conversations.filter(c => !existingContents.has(c.content.trim()));
-
-if (newConversations.length === 0) {
-alert('✅ All conversations already exist in the database!');
-setState({ importing: false, importProgress: { current: 0, total: 0 } });
-return;
-}
-
-alert(`Found ${conversations.length} total conversations.\n${existingConvos?.length || 0} already in database.\n${newConversations.length} new conversations to import.\n\nStarting import...`);
-
-setState({ importProgress: { current: 0, total: newConversations.length } });
-
-// Import in very small batches with longer delays
-const batchSize = 20; // Smaller batches
-let imported = 0;
-let failed = 0;
-const failedItems = [];
-
-for (let i = 0; i < newConversations.length; i += batchSize) {
-const batch = newConversations.slice(i, i + batchSize);
-
-console.log(`Attempting batch ${Math.floor(i/batchSize) + 1}: items ${i} to ${i + batch.length}`);
-
-try {
-const { data, error } = await supabase
-.from('conversations')
-.insert(batch)
-.select();
-
-if (error) {
-console.error('Batch error:', error);
-// Try one by one if batch fails
-for (let j = 0; j < batch.length; j++) {
-const conv = batch[j];
-try {
-const { error: singleError } = await supabase
-.from('conversations')
-.insert([conv]);
-
-if (singleError) {
-console.error(`Failed item ${i + j}:`, singleError);
-failed++;
-failedItems.push({ index: i + j, error: singleError.message });
-} else {
-imported++;
-}
-
-// Small delay between individual inserts
-await new Promise(resolve => setTimeout(resolve, 50));
-} catch (singleError) {
-console.error(`Exception on item ${i + j}:`, singleError);
-failed++;
-failedItems.push({ index: i + j, error: singleError.message });
-}
-}
-} else {
-imported += data.length;
-console.log(`✓ Batch successful: ${data.length} items`);
-}
-} catch (batchError) {
-console.error('Batch exception:', batchError);
-// Try one by one as fallback
-for (let j = 0; j < batch.length; j++) {
-const conv = batch[j];
-try {
-await supabase.from('conversations').insert([conv]);
-imported++;
-} catch (e) {
-failed++;
-failedItems.push({ index: i + j, error: e.message });
-}
-await new Promise(resolve => setTimeout(resolve, 50));
-}
-}
-
-setState({ importProgress: { current: imported + failed, total: newConversations.length } });
-console.log(`Progress: ${imported + failed} / ${newConversations.length} (${imported} successful, ${failed} failed)`);
-
-// Longer delay between batches to avoid rate limits (500ms)
-if (i + batchSize < newConversations.length) {
-await new Promise(resolve => setTimeout(resolve, 500));
-}
-}
-
-let resultMessage = `✅ Import complete!\n✓ Successfully imported: ${imported}\n✗ Failed: ${failed}`;
-
-if (failedItems.length > 0 && failedItems.length < 20) {
-resultMessage += '\n\nFailed items:\n' + failedItems.map(f => `Item ${f.index}: ${f.error}`).join('\n');
-}
-
-console.log('Failed items:', failedItems);
-alert(resultMessage);
-
-setState({ importing: false, importProgress: { current: 0, total: 0 } });
-await loadConversations();
-} catch (error) {
-console.error('Import error:', error);
-alert('Import failed: ' + error.message + '\n\nCheck console (F12) for details.');
-setState({ importing: false, importProgress: { current: 0, total: 0 } });
-}
-}
-
-// Bulk import conversations
-async function bulkImportConversations() {
-if (!state.bulkImportData.trim()) {
-alert('Please paste your conversation data');
-return;
-}
-
-setState({ importing: true });
-
-try {
-// Try to parse as JSON first
-let conversations = [];
-
-try {
-const parsed = JSON.parse(state.bulkImportData);
-if (parsed.conversations && Array.isArray(parsed.conversations)) {
-conversations = parsed.conversations;
-} else if (Array.isArray(parsed)) {
-conversations = parsed;
-} else {
-throw new Error('Invalid format');
-}
-} catch (e) {
-// If JSON parse fails, try line-by-line format
-const lines = state.bulkImportData.split('\n---CONVERSATION---\n');
-conversations = lines
-.map(line => line.trim())
-.filter(line => line.length > 10)
-.map(content => ({ content }));
-}
-
-if (conversations.length === 0) {
-throw new Error('No valid conversations found');
-}
-
-// Confirm before importing
-if (!confirm(`Import ${conversations.length} conversations? This may take a minute.`)) {
-setState({ importing: false });
-return;
-}
-
-// Import in batches of 100 to avoid timeout
-const batchSize = 100;
-let imported = 0;
-
-for (let i = 0; i < conversations.length; i += batchSize) {
-const batch = conversations.slice(i, i + batchSize);
-
-const { error } = await supabase
-.from('conversations')
-.insert(batch);
-
-if (error) throw error;
-
-imported += batch.length;
-console.log(`Imported ${imported} of ${conversations.length} conversations`);
-}
-
-alert(`✅ Successfully imported ${conversations.length} conversations!`);
-setState({ bulkImportData: '', showBulkImport: false, importing: false });
-await loadConversations();
-} catch (error) {
-console.error('Import error:', error);
-alert('Import failed: ' + error.message);
-setState({ importing: false });
-}
-}
-
-async function addConversation() {
-if (!state.newConvo.trim()) {
-alert('Please enter a conversation');
-return;
-}
-
-try {
-const { error } = await supabase
-.from('conversations')
-.insert([{ content: state.newConvo }]);
-
-if (error) throw error;
-
-alert('✅ Conversation added successfully!');
-setState({ newConvo: '' });
-await loadConversations();
-} catch (error) {
-console.error('Error adding:', error);
-alert('Error adding conversation: ' + error.message);
-}
-}
-
-async function deleteConversation(id) {
-if (!state.isAdmin) {
-alert('❌ Only admins can delete conversations!');
-return;
-}
-
-if (!confirm('Delete this conversation? This cannot be undone.')) return;
-
-try {
-const { error } = await supabase
-.from('conversations')
-.delete()
-.eq('id', id);
-
-if (error) throw error;
-
-await loadConversations();
-alert('✅ Conversation deleted!');
-} catch (error) {
-console.error('Error deleting:', error);
-alert('Error deleting conversation: ' + error.message);
-}
-}
-
-async function generateConversation() {
-if (!state.topic.trim()) {
-alert('Please enter a topic/description for the conversation');
-return;
-}
-
-if (state.conversations.length === 0) {
-alert('Please add some sample conversations first. The AI needs examples to learn from!');
-return;
-}
-
-setState({ loading: true, generatedConvo: '' });
-
-try {
-const samples = state.conversations
-.sort(() => Math.random() - 0.5)
-.slice(0, Math.min(5, state.conversations.length))
-.map((c, idx) => `EXAMPLE ${idx + 1}:\n${c.content}`)
-.join('\n\n═══════════════════════════════════════\n\n');
-
-const prompt = `You are an expert conversation pattern replicator. Your job is to study example conversations and generate NEW conversations that EXACTLY match their style, format, and structure.
+  <div id="root"></div>
+
+  <script type="module">
+    // ⚠️ REPLACE THESE WITH YOUR CREDENTIALS
+    const SUPABASE_URL = 'https://feohwmdogtwwseyaohdo.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_jlcqCVhEyIQNKgIBqox1_Q_1g5A6o8W';
+    
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let state = {
+      conversations: [],
+      newConvo: '',
+      topic: '',
+      generatedConvo: '',
+      loading: false,
+      activeTab: 'generate',
+      isInitialized: false,
+      totalConversations: 0,
+      isAdmin: false,
+      showAdminLogin: false,
+      adminPassword: '',
+      showBulkImport: false,
+      bulkImportData: '',
+      importing: false,
+      importProgress: { current: 0, total: 0 },
+      showGoogleDocsImport: false,
+      googleDocsLinks: ''
+    };
+
+    function setState(updates) {
+      state = { ...state, ...updates };
+      render();
+    }
+
+    // Check if user is admin on load
+    async function checkAdminStatus() {
+      const token = localStorage.getItem('adminToken');
+      if (!token) {
+        setState({ isAdmin: false });
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('admin_sessions')
+          .select('*')
+          .eq('session_token', token)
+          .gt('expires_at', new Date().toISOString())
+          .single();
+
+        if (error || !data) {
+          localStorage.removeItem('adminToken');
+          setState({ isAdmin: false });
+        } else {
+          setState({ isAdmin: true });
+        }
+      } catch (error) {
+        localStorage.removeItem('adminToken');
+        setState({ isAdmin: false });
+      }
+    }
+
+    // Admin login - now secure via API
+    async function adminLogin() {
+      if (!state.adminPassword.trim()) {
+        alert('Please enter password');
+        return;
+      }
+
+      try {
+        // Call secure backend API
+        const response = await fetch('/api/admin-auth', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ password: state.adminPassword }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          // Store admin session
+          const sessionData = {
+            token: data.token,
+            timestamp: Date.now(),
+            expires: Date.now() + (7 * 24 * 60 * 60 * 1000) // 7 days
+          };
+          
+          localStorage.setItem('adminSession', JSON.stringify(sessionData));
+          
+          // Also store in Supabase for cross-device support (optional)
+          await supabase
+            .from('admin_sessions')
+            .insert([{ 
+              session_token: data.token,
+              expires_at: new Date(sessionData.expires).toISOString()
+            }]);
+
+          setState({ isAdmin: true, showAdminLogin: false, adminPassword: '' });
+          alert('✅ Logged in as Admin!');
+        } else {
+          alert('❌ ' + (data.error || 'Invalid password'));
+          setState({ adminPassword: '' });
+        }
+      } catch (error) {
+        console.error('Login error:', error);
+        alert('Login failed: ' + error.message);
+        setState({ adminPassword: '' });
+      }
+    }
+
+    // Admin logout
+    function adminLogout() {
+      localStorage.removeItem('adminToken');
+      setState({ isAdmin: false, adminPassword: '' });
+      alert('👋 Logged out successfully!');
+    }
+
+    // Clear all conversations (Admin only)
+    async function clearAllConversations() {
+      if (!state.isAdmin) {
+        alert('❌ Only admins can clear the database!');
+        return;
+      }
+
+      const confirmText = prompt(
+        '⚠️ WARNING: This will DELETE ALL conversations from the database!\n\n' +
+        'This action CANNOT be undone!\n\n' +
+        'Type "DELETE ALL" to confirm:'
+      );
+
+      if (confirmText !== 'DELETE ALL') {
+        alert('Cancelled. No data was deleted.');
+        return;
+      }
+
+      try {
+        // Delete all conversations
+        const { error } = await supabase
+          .from('conversations')
+          .delete()
+          .neq('id', 0); // This deletes everything
+
+        if (error) throw error;
+
+        alert('✅ All conversations have been deleted!');
+        await loadConversations();
+      } catch (error) {
+        console.error('Error clearing data:', error);
+        alert('Error clearing database: ' + error.message);
+      }
+    }
+
+    // Remove duplicate conversations (Admin only)
+    async function removeDuplicates() {
+      if (!state.isAdmin) {
+        alert('❌ Only admins can remove duplicates!');
+        return;
+      }
+
+      if (!confirm('Remove duplicate conversations? This will keep only one copy of each unique conversation.')) {
+        return;
+      }
+
+      try {
+        // Get all conversations
+        const { data: allConvos, error } = await supabase
+          .from('conversations')
+          .select('*')
+          .order('added_at', { ascending: true });
+
+        if (error) throw error;
+
+        // Find duplicates
+        const seen = new Map();
+        const duplicateIds = [];
+
+        allConvos.forEach(convo => {
+          const normalizedContent = convo.content.trim();
+          if (seen.has(normalizedContent)) {
+            duplicateIds.push(convo.id);
+          } else {
+            seen.set(normalizedContent, convo.id);
+          }
+        });
+
+        if (duplicateIds.length === 0) {
+          alert('✅ No duplicates found!');
+          return;
+        }
+
+        if (!confirm(`Found ${duplicateIds.length} duplicate conversations. Delete them?`)) {
+          return;
+        }
+
+        // Delete duplicates in batches
+        const batchSize = 100;
+        for (let i = 0; i < duplicateIds.length; i += batchSize) {
+          const batch = duplicateIds.slice(i, i + batchSize);
+          await supabase
+            .from('conversations')
+            .delete()
+            .in('id', batch);
+        }
+
+        alert(`✅ Removed ${duplicateIds.length} duplicate conversations!`);
+        await loadConversations();
+      } catch (error) {
+        console.error('Error removing duplicates:', error);
+        alert('Error removing duplicates: ' + error.message);
+      }
+    }
+
+    async function loadConversations() {
+      try {
+        const { data, error } = await supabase
+          .from('conversations')
+          .select('*')
+          .order('added_at', { ascending: false });
+
+        if (error) throw error;
+
+        setState({ 
+          conversations: data || [], 
+          totalConversations: data?.length || 0,
+          isInitialized: true 
+        });
+      } catch (error) {
+        console.error('Error loading:', error);
+        alert('Error loading conversations: ' + error.message);
+        setState({ isInitialized: true });
+      }
+    }
+
+    // Import from Google Docs links
+    async function importFromGoogleDocs() {
+      if (!state.googleDocsLinks.trim()) {
+        alert('Please paste Google Docs links');
+        return;
+      }
+
+      // Extract links from text
+      const links = state.googleDocsLinks
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.includes('docs.google.com') || line.includes('drive.google.com'));
+
+      if (links.length === 0) {
+        alert('No valid Google Docs links found. Make sure links contain "docs.google.com"');
+        return;
+      }
+
+      if (!confirm(`Found ${links.length} Google Docs links. Import conversations from all of them?`)) {
+        return;
+      }
+
+      setState({ importing: true, importProgress: { current: 0, total: links.length } });
+
+      const conversations = [];
+      const failed = [];
+
+      for (let i = 0; i < links.length; i++) {
+        const link = links[i];
+        
+        try {
+          console.log(`Processing document ${i + 1}/${links.length}: ${link}`);
+          
+          // Extract document ID from link
+          let docId = '';
+          if (link.includes('/document/d/')) {
+            docId = link.split('/document/d/')[1].split('/')[0];
+          } else if (link.includes('/file/d/')) {
+            docId = link.split('/file/d/')[1].split('/')[0];
+          } else if (link.includes('id=')) {
+            docId = link.split('id=')[1].split('&')[0];
+          }
+
+          if (!docId) {
+            console.error('Could not extract document ID from:', link);
+            failed.push({ link, error: 'Invalid link format' });
+            continue;
+          }
+
+          // Use Google Docs export as plain text
+          const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+          
+          const response = await fetch(exportUrl);
+          
+          if (!response.ok) {
+            console.error('Failed to fetch document:', response.status);
+            failed.push({ link, error: `HTTP ${response.status} - Document may be private` });
+            continue;
+          }
+
+          const text = await response.text();
+          
+          if (!text || text.trim().length < 10) {
+            failed.push({ link, error: 'Document is empty or too short' });
+            continue;
+          }
+
+          conversations.push({ content: text.trim() });
+          console.log(`✓ Successfully extracted document ${i + 1}`);
+          
+        } catch (error) {
+          console.error(`Error processing document ${i + 1}:`, error);
+          failed.push({ link, error: error.message });
+        }
+
+        setState({ importProgress: { current: i + 1, total: links.length } });
+        
+        // Small delay to avoid rate limits
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+
+      if (conversations.length === 0) {
+        alert('❌ No conversations extracted. All documents failed.\n\nMake sure:\n1. Documents are set to "Anyone with the link can view"\n2. Links are correct Google Docs URLs');
+        setState({ importing: false, importProgress: { current: 0, total: 0 } });
+        return;
+      }
+
+      // Now import to database
+      console.log(`Importing ${conversations.length} conversations to database...`);
+      
+      const batchSize = 20;
+      let imported = 0;
+      let importFailed = 0;
+
+      for (let i = 0; i < conversations.length; i += batchSize) {
+        const batch = conversations.slice(i, i + batchSize);
+        
+        try {
+          const { data, error } = await supabase
+            .from('conversations')
+            .insert(batch)
+            .select();
+
+          if (error) {
+            console.error('Batch import error:', error);
+            importFailed += batch.length;
+          } else {
+            imported += data.length;
+          }
+        } catch (error) {
+          console.error('Batch exception:', error);
+          importFailed += batch.length;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      let message = `✅ Import Complete!\n\n`;
+      message += `📄 Documents processed: ${links.length}\n`;
+      message += `✓ Successfully extracted: ${conversations.length}\n`;
+      message += `✗ Failed to extract: ${failed.length}\n\n`;
+      message += `💾 Database Import:\n`;
+      message += `✓ Successfully imported: ${imported}\n`;
+      message += `✗ Failed: ${importFailed}`;
+
+      if (failed.length > 0 && failed.length < 10) {
+        message += '\n\nFailed documents:\n';
+        failed.forEach((f, idx) => {
+          message += `${idx + 1}. ${f.error}\n`;
+        });
+      }
+
+      alert(message);
+      
+      setState({ 
+        importing: false, 
+        importProgress: { current: 0, total: 0 },
+        showGoogleDocsImport: false,
+        googleDocsLinks: ''
+      });
+      
+      await loadConversations();
+    }
+
+    // Import from GitHub JSON file
+    async function importFromGitHub() {
+      if (!confirm('Import conversations from /data/conversations.json? This will add all conversations from the file.')) {
+        return;
+      }
+
+      setState({ importing: true, importProgress: { current: 0, total: 0 } });
+
+      try {
+        // Fetch from your GitHub repo
+        const response = await fetch('/data/conversations.json');
+        
+        if (!response.ok) {
+          throw new Error('Failed to load conversations.json file');
+        }
+
+        const data = await response.json();
+        
+        // Support different JSON formats
+        let conversations = [];
+        if (Array.isArray(data)) {
+          conversations = data.map(item => {
+            if (item.conversation) {
+              return { content: item.conversation };
+            } else if (item.content) {
+              return { content: item.content };
+            }
+            return null;
+          }).filter(item => item !== null && item.content && item.content.trim().length > 0);
+        } else if (data.conversations && Array.isArray(data.conversations)) {
+          conversations = data.conversations.map(item => {
+            if (item.conversation) {
+              return { content: item.conversation };
+            } else if (item.content) {
+              return { content: item.content };
+            }
+            return null;
+          }).filter(item => item !== null && item.content && item.content.trim().length > 0);
+        } else if (typeof data === 'object' && !Array.isArray(data)) {
+          conversations = Object.values(data).map(content => ({ content }));
+        } else {
+          throw new Error('Unsupported JSON format');
+        }
+
+        if (conversations.length === 0) {
+          throw new Error('No conversations found in the file');
+        }
+
+        // Check which conversations already exist
+        console.log('Checking for existing conversations...');
+        const { data: existingConvos } = await supabase
+          .from('conversations')
+          .select('content');
+        
+        const existingContents = new Set(existingConvos?.map(c => c.content.trim()) || []);
+        const newConversations = conversations.filter(c => !existingContents.has(c.content.trim()));
+        
+        if (newConversations.length === 0) {
+          alert('✅ All conversations already exist in the database!');
+          setState({ importing: false, importProgress: { current: 0, total: 0 } });
+          return;
+        }
+
+        alert(`Found ${conversations.length} total conversations.\n${existingConvos?.length || 0} already in database.\n${newConversations.length} new conversations to import.\n\nStarting import...`);
+
+        setState({ importProgress: { current: 0, total: newConversations.length } });
+
+        // Import in very small batches with longer delays
+        const batchSize = 20; // Smaller batches
+        let imported = 0;
+        let failed = 0;
+        const failedItems = [];
+        
+        for (let i = 0; i < newConversations.length; i += batchSize) {
+          const batch = newConversations.slice(i, i + batchSize);
+          
+          console.log(`Attempting batch ${Math.floor(i/batchSize) + 1}: items ${i} to ${i + batch.length}`);
+          
+          try {
+            const { data, error } = await supabase
+              .from('conversations')
+              .insert(batch)
+              .select();
+
+            if (error) {
+              console.error('Batch error:', error);
+              // Try one by one if batch fails
+              for (let j = 0; j < batch.length; j++) {
+                const conv = batch[j];
+                try {
+                  const { error: singleError } = await supabase
+                    .from('conversations')
+                    .insert([conv]);
+                  
+                  if (singleError) {
+                    console.error(`Failed item ${i + j}:`, singleError);
+                    failed++;
+                    failedItems.push({ index: i + j, error: singleError.message });
+                  } else {
+                    imported++;
+                  }
+                  
+                  // Small delay between individual inserts
+                  await new Promise(resolve => setTimeout(resolve, 50));
+                } catch (singleError) {
+                  console.error(`Exception on item ${i + j}:`, singleError);
+                  failed++;
+                  failedItems.push({ index: i + j, error: singleError.message });
+                }
+              }
+            } else {
+              imported += data.length;
+              console.log(`✓ Batch successful: ${data.length} items`);
+            }
+          } catch (batchError) {
+            console.error('Batch exception:', batchError);
+            // Try one by one as fallback
+            for (let j = 0; j < batch.length; j++) {
+              const conv = batch[j];
+              try {
+                await supabase.from('conversations').insert([conv]);
+                imported++;
+              } catch (e) {
+                failed++;
+                failedItems.push({ index: i + j, error: e.message });
+              }
+              await new Promise(resolve => setTimeout(resolve, 50));
+            }
+          }
+          
+          setState({ importProgress: { current: imported + failed, total: newConversations.length } });
+          console.log(`Progress: ${imported + failed} / ${newConversations.length} (${imported} successful, ${failed} failed)`);
+          
+          // Longer delay between batches to avoid rate limits (500ms)
+          if (i + batchSize < newConversations.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+
+        let resultMessage = `✅ Import complete!\n✓ Successfully imported: ${imported}\n✗ Failed: ${failed}`;
+        
+        if (failedItems.length > 0 && failedItems.length < 20) {
+          resultMessage += '\n\nFailed items:\n' + failedItems.map(f => `Item ${f.index}: ${f.error}`).join('\n');
+        }
+        
+        console.log('Failed items:', failedItems);
+        alert(resultMessage);
+        
+        setState({ importing: false, importProgress: { current: 0, total: 0 } });
+        await loadConversations();
+      } catch (error) {
+        console.error('Import error:', error);
+        alert('Import failed: ' + error.message + '\n\nCheck console (F12) for details.');
+        setState({ importing: false, importProgress: { current: 0, total: 0 } });
+      }
+    }
+
+    // Bulk import conversations
+    async function bulkImportConversations() {
+      if (!state.bulkImportData.trim()) {
+        alert('Please paste your conversation data');
+        return;
+      }
+
+      setState({ importing: true });
+
+      try {
+        // Try to parse as JSON first
+        let conversations = [];
+        
+        try {
+          const parsed = JSON.parse(state.bulkImportData);
+          if (parsed.conversations && Array.isArray(parsed.conversations)) {
+            conversations = parsed.conversations;
+          } else if (Array.isArray(parsed)) {
+            conversations = parsed;
+          } else {
+            throw new Error('Invalid format');
+          }
+        } catch (e) {
+          // If JSON parse fails, try line-by-line format
+          const lines = state.bulkImportData.split('\n---CONVERSATION---\n');
+          conversations = lines
+            .map(line => line.trim())
+            .filter(line => line.length > 10)
+            .map(content => ({ content }));
+        }
+
+        if (conversations.length === 0) {
+          throw new Error('No valid conversations found');
+        }
+
+        // Confirm before importing
+        if (!confirm(`Import ${conversations.length} conversations? This may take a minute.`)) {
+          setState({ importing: false });
+          return;
+        }
+
+        // Import in batches of 100 to avoid timeout
+        const batchSize = 100;
+        let imported = 0;
+        
+        for (let i = 0; i < conversations.length; i += batchSize) {
+          const batch = conversations.slice(i, i + batchSize);
+          
+          const { error } = await supabase
+            .from('conversations')
+            .insert(batch);
+
+          if (error) throw error;
+          
+          imported += batch.length;
+          console.log(`Imported ${imported} of ${conversations.length} conversations`);
+        }
+
+        alert(`✅ Successfully imported ${conversations.length} conversations!`);
+        setState({ bulkImportData: '', showBulkImport: false, importing: false });
+        await loadConversations();
+      } catch (error) {
+        console.error('Import error:', error);
+        alert('Import failed: ' + error.message);
+        setState({ importing: false });
+      }
+    }
+
+    async function addConversation() {
+      if (!state.newConvo.trim()) {
+        alert('Please enter a conversation');
+        return;
+      }
+
+      try {
+        const { error } = await supabase
+          .from('conversations')
+          .insert([{ content: state.newConvo }]);
+
+        if (error) throw error;
+
+        alert('✅ Conversation added successfully!');
+        setState({ newConvo: '' });
+        await loadConversations();
+      } catch (error) {
+        console.error('Error adding:', error);
+        alert('Error adding conversation: ' + error.message);
+      }
+    }
+
+    async function deleteConversation(id) {
+      if (!state.isAdmin) {
+        alert('❌ Only admins can delete conversations!');
+        return;
+      }
+
+      if (!confirm('Delete this conversation? This cannot be undone.')) return;
+
+      try {
+        const { error } = await supabase
+          .from('conversations')
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
+
+        await loadConversations();
+        alert('✅ Conversation deleted!');
+      } catch (error) {
+        console.error('Error deleting:', error);
+        alert('Error deleting conversation: ' + error.message);
+      }
+    }
+
+    async function generateConversation() {
+      if (!state.topic.trim()) {
+        alert('Please enter a topic/description for the conversation');
+        return;
+      }
+
+      if (state.conversations.length === 0) {
+        alert('Please add some sample conversations first. The AI needs examples to learn from!');
+        return;
+      }
+
+      setState({ loading: true, generatedConvo: '' });
+
+      try {
+        const samples = state.conversations
+          .sort(() => Math.random() - 0.5)
+          .slice(0, Math.min(5, state.conversations.length))
+          .map((c, idx) => `EXAMPLE ${idx + 1}:\n${c.content}`)
+          .join('\n\n═══════════════════════════════════════\n\n');
+
+        const prompt = `You are an expert conversation pattern replicator. Your job is to study example conversations and generate NEW conversations that EXACTLY match their style, format, and structure.
 
 TASK: Generate a conversation about the following topic/description:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -720,383 +720,383 @@ OUTPUT RULES:
 
 BEGIN GENERATING NOW:`;
 
-const response = await fetch('/api/generate', {
-method: 'POST',
-headers: {
-Content-Type': 'application/json',
-},
-body: JSON.stringify({ prompt }),
-});
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ prompt }),
+        });
 
-const data = await response.json();
+        const data = await response.json();
 
-if (data.text) {
-let cleanedText = data.text.trim();
+        if (data.text) {
+          let cleanedText = data.text.trim();
+          
+          cleanedText = cleanedText
+            .replace(/^(Here's the conversation|Here is the conversation|Here's|Here is|Generated conversation:?|Let me (create|generate)|I'll (create|generate)|Sure,? here'?s?|Okay,? here'?s?)/i, '')
+            .replace(/^[:\-\s]+/, '')
+            .trim();
+          
+          cleanedText = cleanedText.replace(/^```[\w]*\n?/gm, '').replace(/\n?```$/gm, '');
+          
+          const hasDialogueFormat = /^(Buyer|Seller|Customer|Agent|User|Person|Client|Representative|Support|Sales|Student|Teacher|Applicant|Interviewer|Patient|Doctor|Host|Guest):/im.test(cleanedText);
+          
+          if (!hasDialogueFormat) {
+            console.warn('Generated text might not match expected format');
+            const looksLikeConversation = cleanedText.includes(':') && cleanedText.split('\n').length > 3;
+            
+            if (!looksLikeConversation) {
+              alert('⚠️ The AI response doesn\'t look like a proper conversation. Try generating again.');
+            }
+          }
+          
+          const lineCount = cleanedText.split('\n').filter(line => line.trim().length > 0).length;
+          if (lineCount < 4) {
+            alert('⚠️ Generated conversation seems too short. Try again or add more detailed examples.');
+          }
+          
+          setState({ generatedConvo: cleanedText, loading: false });
+        } else {
+          throw new Error(data.error || 'No response from API');
+        }
+      } catch (error) {
+        console.error('Generation error:', error);
+        alert('Failed to generate conversation: ' + error.message);
+        setState({ loading: false });
+      }
+    }
 
-cleanedText = cleanedText
-.replace(/^(Here's the conversation|Here is the conversation|Here's|Here is|Generated conversation:?|Let me (create|generate)|I'll (create|generate)|Sure,? here'?s?|Okay,? here'?s?)/i, '')
-.replace(/^[:\-\s]+/, '')
-.trim();
+    function exportData() {
+      const dataStr = JSON.stringify(state.conversations, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'conversations-backup.json';
+      link.click();
+    }
 
-cleanedText = cleanedText.replace(/^```[\w]*\n?/gm, '').replace(/\n?```$/gm, '');
+    function render() {
+      const root = document.getElementById('root');
+      
+      if (!state.isInitialized) {
+        root.innerHTML = `
+          <div class="min-h-screen flex items-center justify-center">
+            <div class="text-lg text-gray-600">Loading...</div>
+          </div>
+        `;
+        return;
+      }
 
-const hasDialogueFormat = /^(Buyer|Seller|Customer|Agent|User|Person|Client|Representative|Support|Sales|Student|Teacher|Applicant|Interviewer|Patient|Doctor|Host|Guest):/im.test(cleanedText);
+      root.innerHTML = `
+        <div class="min-h-screen p-6">
+          <div class="max-w-7xl mx-auto">
+            
+            <!-- Header -->
+            <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+              <div class="flex justify-between items-start">
+                <div>
+                  <h1 class="text-3xl font-bold text-gray-800 mb-2">
+                    🌐 Public Conversation Generator
+                  </h1>
+                  <p class="text-gray-600">
+                    AI-powered conversation generator with community database
+                  </p>
+                  <div class="mt-4 flex gap-4 text-sm">
+                    <div class="flex items-center gap-2">
+                      <span class="font-semibold text-2xl text-blue-600">${state.totalConversations}</span>
+                      <span class="text-gray-600">conversations in database</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Admin Section -->
+                <div class="flex flex-col items-end gap-2">
+                  ${state.isAdmin ? `
+                    <div class="flex items-center gap-2 bg-green-100 px-4 py-2 rounded-lg border-2 border-green-300">
+                      <span class="text-2xl">👑</span>
+                      <span class="font-bold text-green-800">Admin Mode</span>
+                    </div>
+                    <div class="flex gap-2">
+                      <button
+                        onclick="window.removeDuplicates()"
+                        class="text-sm px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded font-medium"
+                      >
+                        🔄 Remove Duplicates
+                      </button>
+                      <button
+                        onclick="window.clearAllData()"
+                        class="text-sm px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium"
+                      >
+                        🗑️ Clear All Data
+                      </button>
+                      <button
+                        onclick="window.adminLogout()"
+                        class="text-sm px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white rounded font-medium"
+                      >
+                        🚪 Logout
+                      </button>
+                    </div>
+                  ` : `
+                    <button
+                      onclick="window.toggleAdminLogin()"
+                      class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg text-gray-700 font-medium transition-all"
+                    >
+                      🔐 Admin Login
+                    </button>
+                  `}
+                </div>
+              </div>
 
-if (!hasDialogueFormat) {
-console.warn('Generated text might not match expected format');
-const looksLikeConversation = cleanedText.includes(':') && cleanedText.split('\n').length > 3;
+              <!-- Admin Login Modal -->
+              ${state.showAdminLogin && !state.isAdmin ? `
+                <div class="mt-4 p-4 bg-blue-50 border-2 border-blue-300 rounded-lg">
+                  <h3 class="font-bold text-gray-800 mb-3">🔐 Admin Login</h3>
+                  <div class="flex gap-2">
+                    <input
+                      type="password"
+                      id="adminPasswordInput"
+                      placeholder="Enter admin password"
+                      class="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      value="${state.adminPassword}"
+                    />
+                    <button
+                      onclick="window.adminLogin()"
+                      class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
+                    >
+                      Login
+                    </button>
+                    <button
+                      onclick="window.toggleAdminLogin()"
+                      class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
 
-if (!looksLikeConversation) {
-alert('⚠️ The AI response doesn\'t look like a proper conversation. Try generating again.');
-}
-}
+            <!-- Tabs -->
+            <div class="bg-white rounded-lg shadow-lg mb-6">
+              <div class="flex border-b">
+                <button onclick="window.setTab('generate')" class="px-6 py-3 font-medium ${state.activeTab === 'generate' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:text-gray-800'}">
+                  ✨ Generate
+                </button>
+                <button onclick="window.setTab('manage')" class="px-6 py-3 font-medium ${state.activeTab === 'manage' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:text-gray-800'}">
+                  💬 Manage Conversations
+                </button>
+              </div>
 
-const lineCount = cleanedText.split('\n').filter(line => line.trim().length > 0).length;
-if (lineCount < 4) {
-alert('⚠️ Generated conversation seems too short. Try again or add more detailed examples.');
-}
+              <!-- Generate Tab -->
+              ${state.activeTab === 'generate' ? `
+                <div class="p-6">
+                  <div class="mb-6">
+                    <label class="block text-base font-semibold text-gray-800 mb-3">
+                      📝 Describe Your Conversation Topic/Requirements
+                    </label>
+                    <p class="text-sm text-gray-600 mb-3">
+                      The AI will analyze ${state.conversations.length > 0 ? state.conversations.length : 'your'} sample conversation${state.conversations.length !== 1 ? 's' : ''} and generate a NEW conversation matching their exact style and format!
+                    </p>
+                    <textarea
+                      id="topicInput"
+                      placeholder="Example: A conversation about selling a used iPhone 15 Pro Max 256GB in excellent condition with original box and accessories. The buyer is asking about battery health and any scratches. Price is negotiable around $900."
+                      rows="6"
+                      class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y text-gray-800"
+                    >${state.topic}</textarea>
+                    <p class="text-xs text-gray-500 mt-2">
+                      💡 <strong>Pro Tip:</strong> Be specific! Include product details, conditions, price range, and any special requirements for best results.
+                    </p>
+                  </div>
 
-setState({ generatedConvo: cleanedText, loading: false });
-} else {
-throw new Error(data.error || 'No response from API');
-}
-} catch (error) {
-console.error('Generation error:', error);
-alert('Failed to generate conversation: ' + error.message);
-setState({ loading: false });
-}
-}
+                  <button
+                    onclick="window.generateConvo()"
+                    ${state.loading || state.conversations.length === 0 ? 'disabled' : ''}
+                    class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-lg font-semibold text-lg hover:from-blue-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transition-all duration-200"
+                  >
+                    ${state.loading ? '⏳ AI Analyzing Patterns & Generating...' : '✨ Generate Pattern-Matched Conversation'}
+                  </button>
 
-function exportData() {
-const dataStr = JSON.stringify(state.conversations, null, 2);
-const blob = new Blob([dataStr], { type: 'application/json' });
-const url = URL.createObjectURL(blob);
-const link = document.createElement('a');
-link.href = url;
-link.download = 'conversations-backup.json';
-link.click();
-}
+                  ${state.conversations.length === 0 ? `
+                    <div class="mt-4 p-4 bg-orange-50 border-l-4 border-orange-500 rounded-lg">
+                      <div class="flex items-start">
+                        <span class="text-2xl mr-3">⚠️</span>
+                        <div>
+                          <p class="font-semibold text-orange-800">No Sample Conversations in Database</p>
+                          <p class="text-sm text-orange-700 mt-1">
+                            The AI needs sample conversations to learn patterns from! Add at least 3-5 conversations in the "Manage Conversations" tab.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ` : state.conversations.length < 3 ? `
+                    <div class="mt-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 rounded-lg">
+                      <div class="flex items-start">
+                        <span class="text-2xl mr-3">💡</span>
+                        <div>
+                          <p class="font-semibold text-yellow-800">Tip: Add More Examples</p>
+                          <p class="text-sm text-yellow-700 mt-1">
+                            You have ${state.conversations.length} conversation${state.conversations.length !== 1 ? 's' : ''}. Adding 3-5+ examples will help the AI learn better patterns!
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ` : ''}
 
-function render() {
-const root = document.getElementById('root');
-
-if (!state.isInitialized) {
-root.innerHTML = `
-<div class="min-h-screen flex items-center justify-center">
-<div class="text-lg text-gray-600">Loading...</div>
-</div>
-`;
-return;
-}
-
-root.innerHTML = `
-<div class="min-h-screen p-6">
-<div class="max-w-7xl mx-auto">
-
-<!-- Header -->
-<div class="bg-white rounded-lg shadow-lg p-6 mb-6">
-<div class="flex justify-between items-start">
-<div>
-<h1 class="text-3xl font-bold text-gray-800 mb-2">
-🌐 Public Conversation Generator
-</h1>
-<p class="text-gray-600">
-AI-powered conversation generator with community database
-</p>
-<div class="mt-4 flex gap-4 text-sm">
-<div class="flex items-center gap-2">
-<span class="font-semibold text-2xl text-blue-600">${state.totalConversations}</span>
-<span class="text-gray-600">conversations in database</span>
-</div>
-</div>
-</div>
-
-<!-- Admin Section -->
-<div class="flex flex-col items-end gap-2">
-${state.isAdmin ? `
-<div class="flex items-center gap-2 bg-green-100 px-4 py-2 rounded-lg border-2 border-green-300">
-<span class="text-2xl">👑</span>
-<span class="font-bold text-green-800">Admin Mode</span>
-</div>
-<div class="flex gap-2">
-<button
-onclick="window.removeDuplicates()"
-class="text-sm px-3 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded font-medium"
->
-🔄 Remove Duplicates
-</button>
-<button
-onclick="window.clearAllData()"
-class="text-sm px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded font-medium"
->
-🗑️ Clear All Data
-</button>
-<button
-onclick="window.adminLogout()"
-class="text-sm px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white rounded font-medium"
->
-🚪 Logout
-</button>
-</div>
-` : `
-<button
-onclick="window.toggleAdminLogin()"
-class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg text-gray-700 font-medium transition-all"
->
-🔐 Admin Login
-</button>
-`}
-</div>
-</div>
-
-<!-- Admin Login Modal -->
-${state.showAdminLogin && !state.isAdmin ? `
-<div class="mt-4 p-4 bg-blue-50 border-2 border-blue-300 rounded-lg">
-<h3 class="font-bold text-gray-800 mb-3">🔐 Admin Login</h3>
-<div class="flex gap-2">
-<input
-type="password"
-id="adminPasswordInput"
-placeholder="Enter admin password"
-class="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-value="${state.adminPassword}"
-/>
-<button
-onclick="window.adminLogin()"
-class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
->
-Login
-</button>
-<button
-onclick="window.toggleAdminLogin()"
-class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
->
-Cancel
-</button>
-</div>
-</div>
-` : ''}
-</div>
-
-<!-- Tabs -->
-<div class="bg-white rounded-lg shadow-lg mb-6">
-<div class="flex border-b">
-<button onclick="window.setTab('generate')" class="px-6 py-3 font-medium ${state.activeTab === 'generate' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:text-gray-800'}">
-✨ Generate
-</button>
-<button onclick="window.setTab('manage')" class="px-6 py-3 font-medium ${state.activeTab === 'manage' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600 hover:text-gray-800'}">
-💬 Manage Conversations
-</button>
-</div>
-
-<!-- Generate Tab -->
-${state.activeTab === 'generate' ? `
-<div class="p-6">
-<div class="mb-6">
-<label class="block text-base font-semibold text-gray-800 mb-3">
-📝 Describe Your Conversation Topic/Requirements
-</label>
-<p class="text-sm text-gray-600 mb-3">
-The AI will analyze ${state.conversations.length > 0 ? state.conversations.length : 'your'} sample conversation${state.conversations.length !== 1 ? 's' : ''} and generate a NEW conversation matching their exact style and format!
-</p>
-<textarea
-id="topicInput"
-placeholder="Example: A conversation about selling a used iPhone 15 Pro Max 256GB in excellent condition with original box and accessories. The buyer is asking about battery health and any scratches. Price is negotiable around $900."
-rows="6"
-class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-y text-gray-800"
->${state.topic}</textarea>
-<p class="text-xs text-gray-500 mt-2">
-💡 <strong>Pro Tip:</strong> Be specific! Include product details, conditions, price range, and any special requirements for best results.
-</p>
-</div>
-
-<button
-onclick="window.generateConvo()"
-${state.loading || state.conversations.length === 0 ? 'disabled' : ''}
-class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 rounded-lg font-semibold text-lg hover:from-blue-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transition-all duration-200"
->
-${state.loading ? '⏳ AI Analyzing Patterns & Generating...' : '✨ Generate Pattern-Matched Conversation'}
-</button>
-
-${state.conversations.length === 0 ? `
-<div class="mt-4 p-4 bg-orange-50 border-l-4 border-orange-500 rounded-lg">
-<div class="flex items-start">
-<span class="text-2xl mr-3">⚠️</span>
-<div>
-<p class="font-semibold text-orange-800">No Sample Conversations in Database</p>
-<p class="text-sm text-orange-700 mt-1">
-The AI needs sample conversations to learn patterns from! Add at least 3-5 conversations in the "Manage Conversations" tab.
-</p>
-</div>
-</div>
-</div>
-` : state.conversations.length < 3 ? `
-<div class="mt-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 rounded-lg">
-<div class="flex items-start">
-<span class="text-2xl mr-3">💡</span>
-<div>
-<p class="font-semibold text-yellow-800">Tip: Add More Examples</p>
-<p class="text-sm text-yellow-700 mt-1">
-You have ${state.conversations.length} conversation${state.conversations.length !== 1 ? 's' : ''}. Adding 3-5+ examples will help the AI learn better patterns!
-</p>
-</div>
-</div>
-</div>
-` : ''}
-
-${state.generatedConvo ? `
-<div class="mt-6 bg-gradient-to-br from-green-50 to-blue-50 rounded-lg p-6 border-2 border-green-200">
-<div class="flex justify-between items-center mb-4">
-<h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
-<span class="text-2xl">✅</span>
-Generated Conversation
-</h3>
-<button
-onclick="navigator.clipboard.writeText(\`${state.generatedConvo.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`); alert('✅ Copied to clipboard!')"
-class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
->
-📋 Copy
-</button>
-</div>
-<div class="bg-white p-5 rounded-lg border border-gray-200 whitespace-pre-wrap max-h-[500px] overflow-y-auto text-gray-800 leading-relaxed shadow-inner font-mono text-sm">
+                  ${state.generatedConvo ? `
+                    <div class="mt-6 bg-gradient-to-br from-green-50 to-blue-50 rounded-lg p-6 border-2 border-green-200">
+                      <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                          <span class="text-2xl">✅</span>
+                          Generated Conversation
+                        </h3>
+                        <button
+                          onclick="navigator.clipboard.writeText(\`${state.generatedConvo.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`); alert('✅ Copied to clipboard!')"
+                          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                        >
+                          📋 Copy
+                        </button>
+                      </div>
+                      <div class="bg-white p-5 rounded-lg border border-gray-200 whitespace-pre-wrap max-h-[500px] overflow-y-auto text-gray-800 leading-relaxed shadow-inner font-mono text-sm">
 ${state.generatedConvo}
-</div>
-<div class="mt-3 text-xs text-gray-600 bg-blue-50 p-3 rounded">
-ℹ️ This conversation was generated by AI based on ${Math.min(5, state.conversations.length)} sample conversation${Math.min(5, state.conversations.length) !== 1 ? 's' : ''} from the database.
-</div>
-</div>
-` : ''}
-</div>
-` : ''}
+                      </div>
+                      <div class="mt-3 text-xs text-gray-600 bg-blue-50 p-3 rounded">
+                        ℹ️ This conversation was generated by AI based on ${Math.min(5, state.conversations.length)} sample conversation${Math.min(5, state.conversations.length) !== 1 ? 's' : ''} from the database.
+                      </div>
+                    </div>
+                  ` : ''}
+                </div>
+              ` : ''}
 
-<!-- Manage Tab -->
-${state.activeTab === 'manage' ? `
-<div class="p-6">
-<div class="mb-6">
-<div class="flex justify-between items-center mb-3">
-<label class="block text-base font-semibold text-gray-800">
-➕ Add New Conversation to Database
-</label>
-<div class="flex gap-2">
-${state.conversations.length > 0 ? `
-<button
-onclick="window.exportData()"
-class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
->
-📥 Export All (${state.conversations.length})
-</button>
-` : ''}
-<button
-onclick="window.toggleGoogleDocsImport()"
-class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
->
-📑 Import from Google Docs
-</button>
-<button
-onclick="window.importFromGitHub()"
-${state.importing ? 'disabled' : ''}
-class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all disabled:bg-gray-400"
->
-${state.importing ? `⏳ Importing... (${state.importProgress.current}/${state.importProgress.total})` : '📂 Import from File'}
-</button>
-<button
-onclick="window.toggleBulkImport()"
-class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
->
-📦 Manual Import
-</button>
-</div>
-</div>
-<p class="text-sm text-gray-600 mb-3">
-${state.isAdmin ? '👑 <strong>Admin:</strong> You can add and delete conversations.' : '👤 <strong>Visitor:</strong> You can add conversations. Only admins can delete.'}
-</p>
-
-${state.showGoogleDocsImport ? `
-<div class="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
-<div class="flex justify-between items-center mb-3">
-<h4 class="font-bold text-gray-800">📑 Import from Google Docs</h4>
-<button
-onclick="window.toggleGoogleDocsImport()"
-class="text-sm text-gray-600 hover:text-gray-800"
->
-✕ Close
-</button>
-</div>
-<p class="text-sm text-gray-600 mb-3">
-<strong>⚠️ IMPORTANT:</strong> All Google Docs must be set to <strong>"Anyone with the link can view"</strong>
-</p>
-<div class="text-xs bg-white p-3 rounded border mb-3">
-<strong>How to make docs public:</strong><br/>
-1. Open your Google Doc<br/>
-2. Click "Share" button (top right)<br/>
-3. Click "Change to anyone with the link"<br/>
-4. Make sure it says "Viewer" access<br/>
-5. Click "Done"
-</div>
-<p class="text-sm text-gray-700 mb-3">
-Paste your Google Docs links below (one per line):
-</p>
-<textarea
-id="googleDocsLinksInput"
-placeholder="https://docs.google.com/document/d/xxxxx/edit
+              <!-- Manage Tab -->
+              ${state.activeTab === 'manage' ? `
+                <div class="p-6">
+                  <div class="mb-6">
+                    <div class="flex justify-between items-center mb-3">
+                      <label class="block text-base font-semibold text-gray-800">
+                        ➕ Add New Conversation to Database
+                      </label>
+                      <div class="flex gap-2">
+                        ${state.conversations.length > 0 ? `
+                          <button
+                            onclick="window.exportData()"
+                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                          >
+                            📥 Export All (${state.conversations.length})
+                          </button>
+                        ` : ''}
+                        <button
+                          onclick="window.toggleGoogleDocsImport()"
+                          class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                        >
+                          📑 Import from Google Docs
+                        </button>
+                        <button
+                          onclick="window.importFromGitHub()"
+                          ${state.importing ? 'disabled' : ''}
+                          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all disabled:bg-gray-400"
+                        >
+                          ${state.importing ? `⏳ Importing... (${state.importProgress.current}/${state.importProgress.total})` : '📂 Import from File'}
+                        </button>
+                        <button
+                          onclick="window.toggleBulkImport()"
+                          class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                        >
+                          📦 Manual Import
+                        </button>
+                      </div>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-3">
+                      ${state.isAdmin ? '👑 <strong>Admin:</strong> You can add and delete conversations.' : '👤 <strong>Visitor:</strong> You can add conversations. Only admins can delete.'}
+                    </p>
+                    
+                    ${state.showGoogleDocsImport ? `
+                      <div class="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
+                        <div class="flex justify-between items-center mb-3">
+                          <h4 class="font-bold text-gray-800">📑 Import from Google Docs</h4>
+                          <button
+                            onclick="window.toggleGoogleDocsImport()"
+                            class="text-sm text-gray-600 hover:text-gray-800"
+                          >
+                            ✕ Close
+                          </button>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-3">
+                          <strong>⚠️ IMPORTANT:</strong> All Google Docs must be set to <strong>"Anyone with the link can view"</strong>
+                        </p>
+                        <div class="text-xs bg-white p-3 rounded border mb-3">
+                          <strong>How to make docs public:</strong><br/>
+                          1. Open your Google Doc<br/>
+                          2. Click "Share" button (top right)<br/>
+                          3. Click "Change to anyone with the link"<br/>
+                          4. Make sure it says "Viewer" access<br/>
+                          5. Click "Done"
+                        </div>
+                        <p class="text-sm text-gray-700 mb-3">
+                          Paste your Google Docs links below (one per line):
+                        </p>
+                        <textarea
+                          id="googleDocsLinksInput"
+                          placeholder="https://docs.google.com/document/d/xxxxx/edit
 https://docs.google.com/document/d/yyyyy/edit
 https://docs.google.com/document/d/zzzzz/edit"
-rows="8"
-class="w-full px-4 py-3 border-2 border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-y font-mono text-xs"
->${state.googleDocsLinks}</textarea>
-<button
-onclick="window.importGoogleDocs()"
-${state.importing ? 'disabled' : ''}
-class="mt-3 w-full bg-gradient-to-r from-red-600 to-pink-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-red-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-400 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all"
->
-${state.importing ? `⏳ Processing... (${state.importProgress.current}/${state.importProgress.total})` : '📑 Extract & Import All Docs'}
-</button>
-</div>
-` : ''}
-
-${state.showBulkImport ? `
-<div class="mb-4 p-4 bg-purple-50 border-2 border-purple-300 rounded-lg">
-<div class="flex justify-between items-center mb-3">
-<h4 class="font-bold text-gray-800">📦 Bulk Import Conversations</h4>
-<button
-onclick="window.toggleBulkImport()"
-class="text-sm text-gray-600 hover:text-gray-800"
->
-✕ Close
-</button>
-</div>
-<p class="text-sm text-gray-600 mb-3">
-Paste your conversations in one of these formats:
-</p>
-<div class="text-xs bg-white p-3 rounded border mb-3 font-mono">
-<strong>Format 1 - Line by line with separator:</strong><br/>
-Conversation 1 text here...<br/>
----CONVERSATION---<br/>
-Conversation 2 text here...<br/>
----CONVERSATION---<br/>
-Conversation 3 text here...<br/><br/>
-<strong>Format 2 - JSON:</strong><br/>
-[{"content": "Conv 1"}, {"content": "Conv 2"}]
-</div>
-<textarea
-id="bulkImportInput"
-placeholder="Paste all your conversations here..."
-rows="10"
-class="w-full px-4 py-3 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y font-mono text-xs"
->${state.bulkImportData}</textarea>
-<button
-onclick="window.bulkImport()"
-${state.importing ? 'disabled' : ''}
-class="mt-3 w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all"
->
-${state.importing ? '⏳ Importing...' : '📦 Import All Conversations'}
-</button>
-</div>
-` : ''}
-
-<textarea
-id="newConvoInput"
-placeholder="Paste a conversation here...
+                          rows="8"
+                          class="w-full px-4 py-3 border-2 border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-y font-mono text-xs"
+                        >${state.googleDocsLinks}</textarea>
+                        <button
+                          onclick="window.importGoogleDocs()"
+                          ${state.importing ? 'disabled' : ''}
+                          class="mt-3 w-full bg-gradient-to-r from-red-600 to-pink-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-red-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-400 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                        >
+                          ${state.importing ? `⏳ Processing... (${state.importProgress.current}/${state.importProgress.total})` : '📑 Extract & Import All Docs'}
+                        </button>
+                      </div>
+                    ` : ''}
+                    
+                    ${state.showBulkImport ? `
+                      <div class="mb-4 p-4 bg-purple-50 border-2 border-purple-300 rounded-lg">
+                        <div class="flex justify-between items-center mb-3">
+                          <h4 class="font-bold text-gray-800">📦 Bulk Import Conversations</h4>
+                          <button
+                            onclick="window.toggleBulkImport()"
+                            class="text-sm text-gray-600 hover:text-gray-800"
+                          >
+                            ✕ Close
+                          </button>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-3">
+                          Paste your conversations in one of these formats:
+                        </p>
+                        <div class="text-xs bg-white p-3 rounded border mb-3 font-mono">
+                          <strong>Format 1 - Line by line with separator:</strong><br/>
+                          Conversation 1 text here...<br/>
+                          ---CONVERSATION---<br/>
+                          Conversation 2 text here...<br/>
+                          ---CONVERSATION---<br/>
+                          Conversation 3 text here...<br/><br/>
+                          <strong>Format 2 - JSON:</strong><br/>
+                          [{"content": "Conv 1"}, {"content": "Conv 2"}]
+                        </div>
+                        <textarea
+                          id="bulkImportInput"
+                          placeholder="Paste all your conversations here..."
+                          rows="10"
+                          class="w-full px-4 py-3 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y font-mono text-xs"
+                        >${state.bulkImportData}</textarea>
+                        <button
+                          onclick="window.bulkImport()"
+                          ${state.importing ? 'disabled' : ''}
+                          class="mt-3 w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                        >
+                          ${state.importing ? '⏳ Importing...' : '📦 Import All Conversations'}
+                        </button>
+                      </div>
+                    ` : ''}
+                    
+                    <textarea
+                      id="newConvoInput"
+                      placeholder="Paste a conversation here...
 
 Example format:
 Buyer: Hi, is the iPhone still available?
@@ -1104,171 +1104,171 @@ Seller: Yes! It's in excellent condition with 95% battery health.
 Buyer: Can you send more photos of the screen?
 Seller: Sure, I'll send them right now. No scratches at all!
 ..."
-rows="8"
-class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-y font-mono text-sm"
->${state.newConvo}</textarea>
-<button
-onclick="window.addConvo()"
-class="mt-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-green-700 hover:to-emerald-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
->
-➕ Add to Database
-</button>
-</div>
+                      rows="8"
+                      class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-y font-mono text-sm"
+                    >${state.newConvo}</textarea>
+                    <button
+                      onclick="window.addConvo()"
+                      class="mt-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-green-700 hover:to-emerald-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                    >
+                      ➕ Add to Database
+                    </button>
+                  </div>
 
-<div>
-<h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-<span class="text-2xl">💬</span>
-Community Database (${state.totalConversations})
-</h3>
-
-${state.totalConversations > 100 ? `
-<div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-gray-700">
-ℹ️ Showing latest 100 conversations out of ${state.totalConversations} total. All conversations are used for AI generation.
-</div>
-` : ''}
-
-${state.conversations.length === 0 ? `
-<div class="text-center py-16 bg-gradient-to-br from-gray-50 to-blue-50 rounded-lg border-2 border-dashed border-gray-300">
-<div class="text-6xl mb-4">📭</div>
-<p class="text-xl font-semibold text-gray-700">No conversations yet</p>
-<p class="text-gray-600 mt-2">
-Add your first conversation to start building the AI training database!
-</p>
-</div>
-` : `
-<div class="space-y-4 max-h-[600px] overflow-y-auto">
-${state.conversations.map(convo => `
-<div class="bg-gradient-to-br from-white to-gray-50 p-5 rounded-lg border-2 border-gray-200 hover:border-blue-300 hover:shadow-lg transition-all">
-<div class="flex justify-between items-start mb-3">
-<span class="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-📅 ${new Date(convo.added_at).toLocaleString()}
-</span>
-${state.isAdmin ? `
-<button
-onclick="window.deleteConvo(${convo.id})"
-class="text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded-lg font-medium transition-all flex items-center gap-1"
->
-🗑️ Delete
-</button>
-` : `
-<span class="text-xs text-gray-400 px-3 py-1">🔒 Protected</span>
-`}
-</div>
-<div class="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed line-clamp-6 font-mono">
+                  <div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                      <span class="text-2xl">💬</span>
+                      Community Database (${state.totalConversations})
+                    </h3>
+                    
+                    ${state.totalConversations > 100 ? `
+                      <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-gray-700">
+                        ℹ️ Showing latest 100 conversations out of ${state.totalConversations} total. All conversations are used for AI generation.
+                      </div>
+                    ` : ''}
+                    
+                    ${state.conversations.length === 0 ? `
+                      <div class="text-center py-16 bg-gradient-to-br from-gray-50 to-blue-50 rounded-lg border-2 border-dashed border-gray-300">
+                        <div class="text-6xl mb-4">📭</div>
+                        <p class="text-xl font-semibold text-gray-700">No conversations yet</p>
+                        <p class="text-gray-600 mt-2">
+                          Add your first conversation to start building the AI training database!
+                        </p>
+                      </div>
+                    ` : `
+                      <div class="space-y-4 max-h-[600px] overflow-y-auto">
+                        ${state.conversations.map(convo => `
+                          <div class="bg-gradient-to-br from-white to-gray-50 p-5 rounded-lg border-2 border-gray-200 hover:border-blue-300 hover:shadow-lg transition-all">
+                            <div class="flex justify-between items-start mb-3">
+                              <span class="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                                📅 ${new Date(convo.added_at).toLocaleString()}
+                              </span>
+                              ${state.isAdmin ? `
+                                <button
+                                  onclick="window.deleteConvo(${convo.id})"
+                                  class="text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded-lg font-medium transition-all flex items-center gap-1"
+                                >
+                                  🗑️ Delete
+                                </button>
+                              ` : `
+                                <span class="text-xs text-gray-400 px-3 py-1">🔒 Protected</span>
+                              `}
+                            </div>
+                            <div class="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed line-clamp-6 font-mono">
 ${convo.content}
-</div>
-</div>
-`).join('')}
-</div>
-`}
-</div>
-</div>
-` : ''}
-</div>
+                            </div>
+                          </div>
+                        `).join('')}
+                      </div>
+                    `}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
 
-<!-- Instructions -->
-<div class="bg-gradient-to-br from-white to-blue-50 rounded-lg shadow-lg p-6 border-2 border-blue-100">
-<h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-<span class="text-2xl">📖</span>
-How It Works
-</h3>
-<div class="space-y-3 text-gray-700">
-<div class="flex items-start gap-3">
-<span class="text-2xl font-bold text-blue-600">1.</span>
-<div>
-<strong>Train the AI:</strong> Add 3-5+ real conversations. The AI analyzes their format, style, length, and patterns.
-</div>
-</div>
-<div class="flex items-start gap-3">
-<span class="text-2xl font-bold text-blue-600">2.</span>
-<div>
-<strong>Describe Topic:</strong> Write what you want the conversation to be about. Be detailed for best results!
-</div>
-</div>
-<div class="flex items-start gap-3">
-<span class="text-2xl font-bold text-blue-600">3.</span>
-<div>
-<strong>AI Generates:</strong> The AI creates a NEW conversation that matches your examples' style but with your new topic.
-</div>
-</div>
-</div>
+            <!-- Instructions -->
+            <div class="bg-gradient-to-br from-white to-blue-50 rounded-lg shadow-lg p-6 border-2 border-blue-100">
+              <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <span class="text-2xl">📖</span>
+                How It Works
+              </h3>
+              <div class="space-y-3 text-gray-700">
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">1.</span>
+                  <div>
+                    <strong>Train the AI:</strong> Add 3-5+ real conversations. The AI analyzes their format, style, length, and patterns.
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">2.</span>
+                  <div>
+                    <strong>Describe Topic:</strong> Write what you want the conversation to be about. Be detailed for best results!
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">3.</span>
+                  <div>
+                    <strong>AI Generates:</strong> The AI creates a NEW conversation that matches your examples' style but with your new topic.
+                  </div>
+                </div>
+              </div>
+              
+              <div class="mt-5 p-4 bg-blue-100 rounded-lg border-2 border-blue-300">
+                <p class="text-sm text-gray-800">
+                  <strong>👤 User Roles:</strong> All visitors can add conversations to help grow the database. Only admins can delete conversations to maintain quality.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
 
-<div class="mt-5 p-4 bg-blue-100 rounded-lg border-2 border-blue-300">
-<p class="text-sm text-gray-800">
-<strong>👤 User Roles:</strong> All visitors can add conversations to help grow the database. Only admins can delete conversations to maintain quality.
-</p>
-</div>
-</div>
-</div>
-</div>
-`;
+      // Event listeners
+      const topicInput = document.getElementById('topicInput');
+      if (topicInput) {
+        topicInput.addEventListener('input', (e) => {
+          state.topic = e.target.value;
+        });
+      }
 
-// Event listeners
-const topicInput = document.getElementById('topicInput');
-if (topicInput) {
-topicInput.addEventListener('input', (e) => {
-state.topic = e.target.value;
-});
-}
+      const newConvoInput = document.getElementById('newConvoInput');
+      if (newConvoInput) {
+        newConvoInput.addEventListener('input', (e) => {
+          state.newConvo = e.target.value;
+        });
+      }
 
-const newConvoInput = document.getElementById('newConvoInput');
-if (newConvoInput) {
-newConvoInput.addEventListener('input', (e) => {
-state.newConvo = e.target.value;
-});
-}
+      const bulkImportInput = document.getElementById('bulkImportInput');
+      if (bulkImportInput) {
+        bulkImportInput.addEventListener('input', (e) => {
+          state.bulkImportData = e.target.value;
+        });
+      }
 
-const bulkImportInput = document.getElementById('bulkImportInput');
-if (bulkImportInput) {
-bulkImportInput.addEventListener('input', (e) => {
-state.bulkImportData = e.target.value;
-});
-}
+      const googleDocsLinksInput = document.getElementById('googleDocsLinksInput');
+      if (googleDocsLinksInput) {
+        googleDocsLinksInput.addEventListener('input', (e) => {
+          state.googleDocsLinks = e.target.value;
+        });
+      }
 
-const googleDocsLinksInput = document.getElementById('googleDocsLinksInput');
-if (googleDocsLinksInput) {
-googleDocsLinksInput.addEventListener('input', (e) => {
-state.googleDocsLinks = e.target.value;
-});
-}
+      const adminPasswordInput = document.getElementById('adminPasswordInput');
+      if (adminPasswordInput) {
+        adminPasswordInput.addEventListener('input', (e) => {
+          state.adminPassword = e.target.value;
+        });
+        adminPasswordInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+            adminLogin();
+          }
+        });
+      }
+    }
 
-const adminPasswordInput = document.getElementById('adminPasswordInput');
-if (adminPasswordInput) {
-adminPasswordInput.addEventListener('input', (e) => {
-state.adminPassword = e.target.value;
-});
-adminPasswordInput.addEventListener('keypress', (e) => {
-if (e.key === 'Enter') {
-adminLogin();
-}
-});
-}
-}
+    // Global functions
+    window.setTab = (tab) => setState({ activeTab: tab });
+    window.addConvo = addConversation;
+    window.deleteConvo = deleteConversation;
+    window.generateConvo = generateConversation;
+    window.exportData = exportData;
+    window.adminLogin = adminLogin;
+    window.adminLogout = adminLogout;
+    window.toggleAdminLogin = () => setState({ showAdminLogin: !state.showAdminLogin, adminPassword: '' });
+    window.toggleBulkImport = () => setState({ showBulkImport: !state.showBulkImport, bulkImportData: '' });
+    window.bulkImport = bulkImportConversations;
+    window.importFromGitHub = importFromGitHub;
+    window.clearAllData = clearAllConversations;
+    window.removeDuplicates = removeDuplicates;
+    window.toggleGoogleDocsImport = () => setState({ showGoogleDocsImport: !state.showGoogleDocsImport, googleDocsLinks: '' });
+    window.importGoogleDocs = importFromGoogleDocs;
 
-// Global functions
-window.setTab = (tab) => setState({ activeTab: tab });
-window.addConvo = addConversation;
-window.deleteConvo = deleteConversation;
-window.generateConvo = generateConversation;
-window.exportData = exportData;
-window.adminLogin = adminLogin;
-window.adminLogout = adminLogout;
-window.toggleAdminLogin = () => setState({ showAdminLogin: !state.showAdminLogin, adminPassword: '' });
-window.toggleBulkImport = () => setState({ showBulkImport: !state.showBulkImport, bulkImportData: '' });
-window.bulkImport = bulkImportConversations;
-window.importFromGitHub = importFromGitHub;
-window.clearAllData = clearAllConversations;
-window.removeDuplicates = removeDuplicates;
-window.toggleGoogleDocsImport = () => setState({ showGoogleDocsImport: !state.showGoogleDocsImport, googleDocsLinks: '' });
-window.importGoogleDocs = importFromGoogleDocs;
-
-// Initialize
-async function init() {
-await checkAdminStatus();
-await loadConversations();
-}
-
-init();
-</script>
+    // Initialize
+    async function init() {
+      await checkAdminStatus();
+      await loadConversations();
+    }
+    
+    init();
+  </script>
 </body>
 </html>
