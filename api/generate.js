@@ -21,74 +21,72 @@ export default async function handler(req, res) {
     const groqKey = process.env.GROQ_API_KEY;
     
     if (geminiKey) {
-      // Use Gemini with v1 API (stable)
+      // Use Gemini - try multiple model variations
       console.log('Using Gemini API');
       
-      // Use v1 API endpoint with correct model names
-      const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+      // Try different model name formats
+      const modelsToTry = [
+        'gemini-1.5-flash-001',
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash',
+        'gemini-pro',
+        'gemini-1.0-pro'
+      ];
       
-      console.log('Using model:', model);
+      let lastError = null;
       
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: prompt
-              }]
-            }],
-            generationConfig: {
-              temperature: 0.7,
-              topK: 40,
-              topP: 0.95,
-              maxOutputTokens: 2048,
-            },
-            safetySettings: [
-              {
-                category: 'HARM_CATEGORY_HARASSMENT',
-                threshold: 'BLOCK_NONE'
+      for (const model of modelsToTry) {
+        try {
+          console.log('Trying model:', model);
+          
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${geminiKey}`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
               },
-              {
-                category: 'HARM_CATEGORY_HATE_SPEECH',
-                threshold: 'BLOCK_NONE'
-              },
-              {
-                category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-                threshold: 'BLOCK_NONE'
-              },
-              {
-                category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-                threshold: 'BLOCK_NONE'
-              }
-            ]
-          })
+              body: JSON.stringify({
+                contents: [{
+                  parts: [{
+                    text: prompt
+                  }]
+                }],
+                generationConfig: {
+                  temperature: 0.7,
+                  topK: 40,
+                  topP: 0.95,
+                  maxOutputTokens: 2048,
+                }
+              })
+            }
+          );
+
+          const data = await response.json();
+
+          if (response.ok && data.candidates && data.candidates[0] && data.candidates[0].content) {
+            console.log('Success with model:', model);
+            const text = data.candidates[0].content.parts
+              .map(part => part.text)
+              .join('');
+            
+            return res.status(200).json({ text });
+          }
+          
+          lastError = data.error?.message || 'Model not available';
+          console.log('Model', model, 'failed:', lastError);
+          
+        } catch (error) {
+          console.log('Model', model, 'error:', error.message);
+          lastError = error.message;
+          continue;
         }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        console.error('Gemini API error:', data);
-        return res.status(response.status).json({ 
-          error: data.error?.message || 'API request failed',
-          details: data
-        });
       }
-
-      if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-        const text = data.candidates[0].content.parts
-          .map(part => part.text)
-          .join('');
-        
-        return res.status(200).json({ text });
-      } else {
-        throw new Error('Unexpected response format from Gemini');
-      }
+      
+      // If we get here, all models failed
+      return res.status(500).json({ 
+        error: `All Gemini models failed. Last error: ${lastError}. Please check your API key at https://aistudio.google.com/app/apikey`
+      });
       
     } else if (groqKey) {
       // Fallback to Groq
