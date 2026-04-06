@@ -21,23 +21,16 @@ export default async function handler(req, res) {
     const groqKey = process.env.GROQ_API_KEY;
     
     if (geminiKey) {
-      // Use Gemini
+      // Use Gemini with v1 API (stable)
       console.log('Using Gemini API');
       
-      // Correct model names for v1beta API
-      const modelMap = {
-        'gemini-1.5-flash': 'gemini-1.5-flash-latest',
-        'gemini-1.5-pro': 'gemini-1.5-pro-latest',
-        'gemini-2.0-flash-exp': 'gemini-2.0-flash-exp'
-      };
-      
-      const requestedModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-      const model = modelMap[requestedModel] || 'gemini-1.5-flash-latest';
+      // Use v1 API endpoint with correct model names
+      const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
       
       console.log('Using model:', model);
       
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+        `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${geminiKey}`,
         {
           method: 'POST',
           headers: {
