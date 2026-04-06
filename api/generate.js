@@ -20,51 +20,66 @@ export default async function handler(req, res) {
     const geminiKey = process.env.GEMINI_API_KEY;
     const groqKey = process.env.GROQ_API_KEY;
     
-    if (geminiKey) {
-      // Use Gemini
-      console.log('Using Gemini API');
-      const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-      
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
+    // ... inside your handler ...
+
+if (geminiKey) {
+  console.log('Using Gemini API');
+  
+  // FIX 1: Clean the model name. 
+  // If process.env.GEMINI_MODEL is "models/gemini-1.5-flash", we strip the prefix.
+  // The URL structure requires: models/{modelName}:generateContent
+  let modelName = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+  if (modelName.includes('/')) {
+    modelName = modelName.split('/').pop();
+  }
+  
+  // FIX 2: Use v1 instead of v1beta for better stability with 1.5 Flash
+  const apiVersion = 'v1'; 
+  
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${geminiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 2048,
+        },
+        // Note: BLOCK_NONE is sometimes restricted for certain regions/accounts.
+        // If you still get errors, try changing these to 'BLOCK_ONLY_HIGH'
+        safetySettings: [
+          {
+            category: 'HARM_CATEGORY_HARASSMENT',
+            threshold: 'BLOCK_NONE'
           },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{
-                text: prompt
-              }]
-            }],
-            generationConfig: {
-              temperature: 0.7,
-              topK: 40,
-              topP: 0.95,
-              maxOutputTokens: 2048,
-            },
-            safetySettings: [
-              {
-                category: 'HARM_CATEGORY_HARASSMENT',
-                threshold: 'BLOCK_NONE'
-              },
-              {
-                category: 'HARM_CATEGORY_HATE_SPEECH',
-                threshold: 'BLOCK_NONE'
-              },
-              {
-                category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
-                threshold: 'BLOCK_NONE'
-              },
-              {
-                category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
-                threshold: 'BLOCK_NONE'
-              }
-            ]
-          })
-        }
-      );
+          {
+            category: 'HARM_CATEGORY_HATE_SPEECH',
+            threshold: 'BLOCK_NONE'
+          },
+          {
+            category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT',
+            threshold: 'BLOCK_NONE'
+          },
+          {
+            category: 'HARM_CATEGORY_DANGEROUS_CONTENT',
+            threshold: 'BLOCK_NONE'
+          }
+        ]
+      })
+    }
+  );
+
+// ... rest of your error handling ...
 
       const data = await response.json();
 
