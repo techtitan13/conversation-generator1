@@ -23,7 +23,18 @@ export default async function handler(req, res) {
     if (geminiKey) {
       // Use Gemini
       console.log('Using Gemini API');
-      const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+      
+      // Correct model names for v1beta API
+      const modelMap = {
+        'gemini-1.5-flash': 'gemini-1.5-flash-latest',
+        'gemini-1.5-pro': 'gemini-1.5-pro-latest',
+        'gemini-2.0-flash-exp': 'gemini-2.0-flash-exp'
+      };
+      
+      const requestedModel = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+      const model = modelMap[requestedModel] || 'gemini-1.5-flash-latest';
+      
+      console.log('Using model:', model);
       
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
