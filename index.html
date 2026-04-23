@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Conversation Generator - Public Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.js"></script>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
   <div id="root"></div>
@@ -951,18 +951,405 @@ BEGIN GENERATING NOW:`;
                           <span class="text-2xl">✅</span>
                           Generated Conversation
                         </h3>
+                        <div class="flex gap-2">
+                          <button
+                            onclick="navigator.clipboard.writeText(\`${state.generatedConvo.replace(/`/g, '\\`').replace(/\$/g, '\\
+                </div>
+              ` : ''}
+
+              <!-- Manage Tab -->
+              ${state.activeTab === 'manage' ? `
+                <div class="p-6">
+                  <div class="mb-6">
+                    <div class="flex justify-between items-center mb-3">
+                      <label class="block text-base font-semibold text-gray-800">
+                        ➕ Add New Conversation to Database
+                      </label>
+                      <div class="flex gap-2">
+                        ${state.conversations.length > 0 ? `
+                          <button
+                            onclick="window.exportData()"
+                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                          >
+                            📥 Export All (${state.conversations.length})
+                          </button>
+                        ` : ''}
                         <button
-                          onclick="navigator.clipboard.writeText(\`${state.generatedConvo.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`); alert('✅ Copied to clipboard!')"
-                          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                          onclick="window.toggleGoogleDocsImport()"
+                          class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
                         >
-                          📋 Copy
+                          📑 Import from Google Docs
+                        </button>
+                        <button
+                          onclick="window.importFromGitHub()"
+                          ${state.importing ? 'disabled' : ''}
+                          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all disabled:bg-gray-400"
+                        >
+                          ${state.importing ? `⏳ Importing... (${state.importProgress.current}/${state.importProgress.total})` : '📂 Import from File'}
+                        </button>
+                        <button
+                          onclick="window.toggleBulkImport()"
+                          class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
+                        >
+                          📦 Manual Import
                         </button>
                       </div>
-                      <div class="bg-white p-5 rounded-lg border border-gray-200 whitespace-pre-wrap max-h-[500px] overflow-y-auto text-gray-800 leading-relaxed shadow-inner font-mono text-sm">
-${state.generatedConvo}
+                    </div>
+                    <p class="text-sm text-gray-600 mb-3">
+                      ${state.isAdmin ? '👑 <strong>Admin:</strong> You can add and delete conversations.' : '👤 <strong>Visitor:</strong> You can add conversations. Only admins can delete.'}
+                    </p>
+                    
+                    ${state.showGoogleDocsImport ? `
+                      <div class="mb-4 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
+                        <div class="flex justify-between items-center mb-3">
+                          <h4 class="font-bold text-gray-800">📑 Import from Google Docs</h4>
+                          <button
+                            onclick="window.toggleGoogleDocsImport()"
+                            class="text-sm text-gray-600 hover:text-gray-800"
+                          >
+                            ✕ Close
+                          </button>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-3">
+                          <strong>⚠️ IMPORTANT:</strong> All Google Docs must be set to <strong>"Anyone with the link can view"</strong>
+                        </p>
+                        <div class="text-xs bg-white p-3 rounded border mb-3">
+                          <strong>How to make docs public:</strong><br/>
+                          1. Open your Google Doc<br/>
+                          2. Click "Share" button (top right)<br/>
+                          3. Click "Change to anyone with the link"<br/>
+                          4. Make sure it says "Viewer" access<br/>
+                          5. Click "Done"
+                        </div>
+                        <p class="text-sm text-gray-700 mb-3">
+                          Paste your Google Docs links below (one per line):
+                        </p>
+                        <textarea
+                          id="googleDocsLinksInput"
+                          placeholder="https://docs.google.com/document/d/xxxxx/edit
+https://docs.google.com/document/d/yyyyy/edit
+https://docs.google.com/document/d/zzzzz/edit"
+                          rows="8"
+                          class="w-full px-4 py-3 border-2 border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 resize-y font-mono text-xs"
+                        >${state.googleDocsLinks}</textarea>
+                        <button
+                          onclick="window.importGoogleDocs()"
+                          ${state.importing ? 'disabled' : ''}
+                          class="mt-3 w-full bg-gradient-to-r from-red-600 to-pink-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-red-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-400 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                        >
+                          ${state.importing ? `⏳ Processing... (${state.importProgress.current}/${state.importProgress.total})` : '📑 Extract & Import All Docs'}
+                        </button>
+                      </div>
+                    ` : ''}
+                    
+                    ${state.showBulkImport ? `
+                      <div class="mb-4 p-4 bg-purple-50 border-2 border-purple-300 rounded-lg">
+                        <div class="flex justify-between items-center mb-3">
+                          <h4 class="font-bold text-gray-800">📦 Bulk Import Conversations</h4>
+                          <button
+                            onclick="window.toggleBulkImport()"
+                            class="text-sm text-gray-600 hover:text-gray-800"
+                          >
+                            ✕ Close
+                          </button>
+                        </div>
+                        <p class="text-sm text-gray-600 mb-3">
+                          Paste your conversations in one of these formats:
+                        </p>
+                        <div class="text-xs bg-white p-3 rounded border mb-3 font-mono">
+                          <strong>Format 1 - Line by line with separator:</strong><br/>
+                          Conversation 1 text here...<br/>
+                          ---CONVERSATION---<br/>
+                          Conversation 2 text here...<br/>
+                          ---CONVERSATION---<br/>
+                          Conversation 3 text here...<br/><br/>
+                          <strong>Format 2 - JSON:</strong><br/>
+                          [{"content": "Conv 1"}, {"content": "Conv 2"}]
+                        </div>
+                        <textarea
+                          id="bulkImportInput"
+                          placeholder="Paste all your conversations here..."
+                          rows="10"
+                          class="w-full px-4 py-3 border-2 border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 resize-y font-mono text-xs"
+                        >${state.bulkImportData}</textarea>
+                        <button
+                          onclick="window.bulkImport()"
+                          ${state.importing ? 'disabled' : ''}
+                          class="mt-3 w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 flex items-center justify-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                        >
+                          ${state.importing ? '⏳ Importing...' : '📦 Import All Conversations'}
+                        </button>
+                      </div>
+                    ` : ''}
+                    
+                    <textarea
+                      id="newConvoInput"
+                      placeholder="Paste a conversation here...
+
+Example format:
+Buyer: Hi, is the iPhone still available?
+Seller: Yes! It's in excellent condition with 95% battery health.
+Buyer: Can you send more photos of the screen?
+Seller: Sure, I'll send them right now. No scratches at all!
+..."
+                      rows="8"
+                      class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 resize-y font-mono text-sm"
+                    >${state.newConvo}</textarea>
+                    <button
+                      onclick="window.addConvo()"
+                      class="mt-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-green-700 hover:to-emerald-700 flex items-center gap-2 shadow-lg hover:shadow-xl transition-all"
+                    >
+                      ➕ Add to Database
+                    </button>
+                  </div>
+
+                  <div>
+                    <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                      <span class="text-2xl">💬</span>
+                      Community Database (${state.totalConversations})
+                    </h3>
+                    
+                    ${state.totalConversations > 100 ? `
+                      <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-gray-700">
+                        ℹ️ Showing latest 100 conversations out of ${state.totalConversations} total. All conversations are used for AI generation.
+                      </div>
+                    ` : ''}
+                    
+                    ${state.conversations.length === 0 ? `
+                      <div class="text-center py-16 bg-gradient-to-br from-gray-50 to-blue-50 rounded-lg border-2 border-dashed border-gray-300">
+                        <div class="text-6xl mb-4">📭</div>
+                        <p class="text-xl font-semibold text-gray-700">No conversations yet</p>
+                        <p class="text-gray-600 mt-2">
+                          Add your first conversation to start building the AI training database!
+                        </p>
+                      </div>
+                    ` : `
+                      <div class="space-y-4 max-h-[600px] overflow-y-auto">
+                        ${state.conversations.map(convo => `
+                          <div class="bg-gradient-to-br from-white to-gray-50 p-5 rounded-lg border-2 border-gray-200 hover:border-blue-300 hover:shadow-lg transition-all">
+                            <div class="flex justify-between items-start mb-3">
+                              <span class="text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
+                                📅 ${new Date(convo.added_at).toLocaleString()}
+                              </span>
+                              ${state.isAdmin ? `
+                                <button
+                                  onclick="window.deleteConvo(${convo.id})"
+                                  class="text-red-600 hover:text-red-700 hover:bg-red-50 px-3 py-1 rounded-lg font-medium transition-all flex items-center gap-1"
+                                >
+                                  🗑️ Delete
+                                </button>
+                              ` : `
+                                <span class="text-xs text-gray-400 px-3 py-1">🔒 Protected</span>
+                              `}
+                            </div>
+                            <div class="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed line-clamp-6 font-mono">
+${convo.content}
+                            </div>
+                          </div>
+                        `).join('')}
+                      </div>
+                    `}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+
+            <!-- Instructions -->
+            <div class="bg-gradient-to-br from-white to-blue-50 rounded-lg shadow-lg p-6 border-2 border-blue-100">
+              <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <span class="text-2xl">📖</span>
+                How It Works
+              </h3>
+              <div class="space-y-3 text-gray-700">
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">1.</span>
+                  <div>
+                    <strong>Train the AI:</strong> Add 3-5+ real conversations. The AI analyzes their format, style, length, and patterns.
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">2.</span>
+                  <div>
+                    <strong>Describe Topic:</strong> Write what you want the conversation to be about. Be detailed for best results!
+                  </div>
+                </div>
+                <div class="flex items-start gap-3">
+                  <span class="text-2xl font-bold text-blue-600">3.</span>
+                  <div>
+                    <strong>AI Generates:</strong> The AI creates a NEW conversation that matches your examples' style but with your new topic.
+                  </div>
+                </div>
+              </div>
+              
+              <div class="mt-5 p-4 bg-blue-100 rounded-lg border-2 border-blue-300">
+                <p class="text-sm text-gray-800">
+                  <strong>👤 User Roles:</strong> All visitors can add conversations to help grow the database. Only admins can delete conversations to maintain quality.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Event listeners
+      const topicInput = document.getElementById('topicInput');
+      if (topicInput) {
+        topicInput.addEventListener('input', (e) => {
+          state.topic = e.target.value;
+        });
+      }
+
+      const newConvoInput = document.getElementById('newConvoInput');
+      if (newConvoInput) {
+        newConvoInput.addEventListener('input', (e) => {
+          state.newConvo = e.target.value;
+        });
+      }
+
+      const bulkImportInput = document.getElementById('bulkImportInput');
+      if (bulkImportInput) {
+        bulkImportInput.addEventListener('input', (e) => {
+          state.bulkImportData = e.target.value;
+        });
+      }
+
+      const googleDocsLinksInput = document.getElementById('googleDocsLinksInput');
+      if (googleDocsLinksInput) {
+        googleDocsLinksInput.addEventListener('input', (e) => {
+          state.googleDocsLinks = e.target.value;
+        });
+      }
+
+      const adminPasswordInput = document.getElementById('adminPasswordInput');
+      if (adminPasswordInput) {
+        adminPasswordInput.addEventListener('input', (e) => {
+          state.adminPassword = e.target.value;
+        });
+        adminPasswordInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') {
+            adminLogin();
+          }
+        });
+      }
+    }
+
+    // Global functions
+    window.setTab = (tab) => setState({ activeTab: tab });
+    window.addConvo = addConversation;
+    window.deleteConvo = deleteConversation;
+    window.generateConvo = generateConversation;
+    window.exportData = exportData;
+    window.adminLogin = adminLogin;
+    window.adminLogout = adminLogout;
+    window.toggleAdminLogin = () => setState({ showAdminLogin: !state.showAdminLogin, adminPassword: '' });
+    window.toggleBulkImport = () => setState({ showBulkImport: !state.showBulkImport, bulkImportData: '' });
+    window.bulkImport = bulkImportConversations;
+    window.importFromGitHub = importFromGitHub;
+    window.clearAllData = clearAllConversations;
+    window.removeDuplicates = removeDuplicates;
+    window.toggleGoogleDocsImport = () => setState({ showGoogleDocsImport: !state.showGoogleDocsImport, googleDocsLinks: '' });
+    window.importGoogleDocs = importFromGoogleDocs;
+
+    // Format conversation with colors
+    window.formatConversation = (text) => {
+      const lines = text.split('\n');
+      return lines.map(line => {
+        const trimmedLine = line.trim();
+        
+        // Check if line starts with a speaker label
+        if (/^Buyer:/i.test(trimmedLine)) {
+          return `<div style="color: #1E40AF; font-weight: 500;">${line}</div>`;
+        } else if (/^Seller:/i.test(trimmedLine)) {
+          return `<div style="color: #DC2626; font-weight: 500;">${line}</div>`;
+        } else if (/^Customer:/i.test(trimmedLine)) {
+          return `<div style="color: #1E40AF; font-weight: 500;">${line}</div>`;
+        } else if (/^Agent:/i.test(trimmedLine)) {
+          return `<div style="color: #DC2626; font-weight: 500;">${line}</div>`;
+        } else if (/^(Custom Offer|Requirements?):/i.test(trimmedLine)) {
+          return `<div style="color: #059669; font-weight: 600; margin-top: 8px;">${line}</div>`;
+        } else if (trimmedLine.length > 0) {
+          return `<div style="color: #374151;">${line}</div>`;
+        } else {
+          return '<div style="height: 8px;"></div>';
+        }
+      }).join('');
+    };
+
+    // Copy with formatting for Google Sheets
+    window.copyWithColors = async () => {
+      const text = state.generatedConvo;
+      const lines = text.split('\n');
+      
+      // Create HTML with colors
+      let html = '<div>';
+      lines.forEach(line => {
+        const trimmedLine = line.trim();
+        
+        if (/^Buyer:/i.test(trimmedLine)) {
+          html += `<div style="color: #1E40AF; font-weight: bold;">${line}</div>`;
+        } else if (/^Seller:/i.test(trimmedLine)) {
+          html += `<div style="color: #DC2626; font-weight: bold;">${line}</div>`;
+        } else if (/^Customer:/i.test(trimmedLine)) {
+          html += `<div style="color: #1E40AF; font-weight: bold;">${line}</div>`;
+        } else if (/^Agent:/i.test(trimmedLine)) {
+          html += `<div style="color: #DC2626; font-weight: bold;">${line}</div>`;
+        } else if (/^(Custom Offer|Requirements?):/i.test(trimmedLine)) {
+          html += `<div style="color: #059669; font-weight: bold;">${line}</div>`;
+        } else {
+          html += `<div>${line}</div>`;
+        }
+      });
+      html += '</div>';
+      
+      // Copy both HTML and plain text
+      try {
+        const blobHtml = new Blob([html], { type: 'text/html' });
+        const blobText = new Blob([text], { type: 'text/plain' });
+        
+        const clipboardItem = new ClipboardItem({
+          'text/html': blobHtml,
+          'text/plain': blobText
+        });
+        
+        await navigator.clipboard.write([clipboardItem]);
+        alert('✅ Copied with colors!\n\nNow paste into Google Sheets:\n1. Right-click on cell\n2. Select "Paste" or press Ctrl+V\n\nColors will be preserved:\n• Buyer = Blue\n• Seller = Red\n• Custom Offer/Requirements = Green');
+      } catch (error) {
+        console.error('Copy error:', error);
+        // Fallback to plain text
+        await navigator.clipboard.writeText(text);
+        alert('⚠️ Copied as plain text (colors not supported in this browser).\n\nFor colors, use Chrome or Edge browser.');
+      }
+    };
+
+    // Initialize
+    async function init() {
+      await checkAdminStatus();
+      await loadConversations();
+    }
+    
+    init();
+  </script>
+</body>
+</html>)}\`); alert('✅ Copied plain text to clipboard!')"
+                            class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all text-sm"
+                          >
+                            📋 Copy Text
+                          </button>
+                          <button
+                            onclick="window.copyWithColors()"
+                            class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 shadow-md hover:shadow-lg transition-all text-sm"
+                          >
+                            🎨 Copy for Google Sheets
+                          </button>
+                        </div>
+                      </div>
+                      <div id="generatedConvoDisplay" class="bg-white p-5 rounded-lg border border-gray-200 max-h-[500px] overflow-y-auto leading-relaxed shadow-inner">
+                        ${window.formatConversation ? window.formatConversation(state.generatedConvo) : state.generatedConvo}
                       </div>
                       <div class="mt-3 text-xs text-gray-600 bg-blue-50 p-3 rounded">
                         ℹ️ This conversation was generated by AI based on ${Math.min(5, state.conversations.length)} sample conversation${Math.min(5, state.conversations.length) !== 1 ? 's' : ''} from the database.
+                        <br/>
+                        🎨 Click "Copy for Google Sheets" to copy with colors (Buyer = Blue, Seller = Red)
                       </div>
                     </div>
                   ` : ''}
